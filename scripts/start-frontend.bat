@@ -19,4 +19,4 @@ if "%~1"=="--check" (
 cd /d "%FRONTEND_DIR%"
 
 echo Starting frontend: http://localhost:5174
-npm.cmd run dev
+npm.cmd run dev -- --host 127.0.0.1 --port 5174

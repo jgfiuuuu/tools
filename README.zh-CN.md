@@ -110,6 +110,36 @@ npm run dev
 http://localhost:8000
 ```
 
+## 科研文献工作台
+
+当前版本新增了 AI/CS 文献调研工作台：
+
+- 默认召回约 50 篇候选论文，筛选 20 篇进入工作台。
+- 支持 arXiv、Semantic Scholar、OpenAlex 多源召回和去重。
+- 每篇论文保留标题、作者、年份、链接、摘要、相关性标签和筛选理由。
+- 支持本地 SQLite 历史会话、论文标注、报告保存。
+- 支持基于确认文献生成中文主报告，并导出 Markdown 与 BibTeX。
+- 第一版不自动下载 PDF，不绕过付费墙；开放 PDF 只保留链接。
+
+可选环境变量：
+
+```text
+SCHOLARLY_DB_PATH=./scholarly_sessions.sqlite3
+SCHOLARLY_CANDIDATE_LIMIT=50
+SCHOLARLY_SELECTION_LIMIT=20
+OPENALEX_API_KEY=
+OPENALEX_EMAIL=
+SEMANTIC_SCHOLAR_API_KEY=
+UNPAYWALL_EMAIL=
+```
+
+新接口前缀：
+
+```text
+/research/sessions
+/research/sessions/stream
+```
+
 ## 已验证项
 
 - `uv sync` 可重建 `backend/.venv/`

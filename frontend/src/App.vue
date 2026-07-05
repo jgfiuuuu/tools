@@ -1,2304 +1,3037 @@
 <template>
-  <main class="app-shell" :class="{ expanded: isExpanded }">
-    <div class="aurora" aria-hidden="true">
-      <span></span>
-      <span></span>
-      <span></span>
-    </div>
-
-    <!-- 初始状态：居中输入卡片 -->
-    <div v-if="!isExpanded" class="layout layout-centered">
-      <section class="panel panel-form panel-centered">
-        <header class="panel-head">
-          <div class="logo">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M12 2.5c-.7 0-1.4.2-2 .6L4.6 7C3.6 7.6 3 8.7 3 9.9v4.2c0 1.2.6 2.3 1.6 2.9l5.4 3.9c1.2.8 2.8.8 4 0l5.4-3.9c1-.7 1.6-1.7 1.6-2.9V9.9c0-1.2-.6-2.3-1.6-2.9L14 3.1a3.6 3.6 0 0 0-2-.6Z"
-              />
-            </svg>
+  <main
+    class="workspace"
+    :class="{
+      'left-collapsed': !leftSidebarOpen,
+      'right-collapsed': !rightSidebarOpen
+    }"
+  >
+    <aside class="left-rail">
+      <div class="rail-top">
+        <div class="brand-lockup" :class="{ compact: !leftSidebarOpen }">
+          <div class="brand-mark">MM</div>
+          <div v-if="leftSidebarOpen">
+            <p class="eyebrow">Miaowen Workbench</p>
+            <h1>文献妙妙屋</h1>
+            <p class="brand-copy">以筛选、阅读、判断为中心的 AI/CS 文献工作台。</p>
           </div>
-          <div>
-            <h1>深度研究助手</h1>
-            <p>结合多轮智能检索与总结，实时呈现洞见与引用。</p>
-          </div>
-        </header>
+        </div>
+        <button
+          class="rail-toggle left-handle"
+          type="button"
+          :aria-label="leftSidebarOpen ? '收起左侧栏' : '展开左侧栏'"
+          @click="toggleLeftSidebar"
+        >
+          <span class="handle-dots" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span
+            class="handle-arrow"
+            :class="{ collapsed: !leftSidebarOpen }"
+            aria-hidden="true"
+          ></span>
+        </button>
+      </div>
 
-        <form class="form" @submit.prevent="handleSubmit">
-          <label class="field">
-            <span>研究主题</span>
+      <div v-if="leftSidebarOpen" class="rail-body">
+        <form class="topic-form" @submit.prevent="startResearch">
+          <div class="form-head">
+            <p class="eyebrow">New Session</p>
+            <h2>新建调研</h2>
+          </div>
+          <label>
+            <span>研究问题</span>
             <textarea
-              v-model="form.topic"
-              placeholder="例如：探索多模态模型在 2025 年的关键突破"
-              rows="4"
-              required
-            ></textarea>
+              v-model="topicInput"
+              rows="5"
+              placeholder="例如：How do retrieval augmented language models improve code generation?"
+            />
           </label>
-
-          <section class="options">
-            <label class="field option">
-              <span>搜索引擎</span>
-              <select v-model="form.searchApi">
-                <option value="">沿用后端配置</option>
-                <option
-                  v-for="option in searchOptions"
-                  :key="option"
-                  :value="option"
-                >
-                  {{ option }}
-                </option>
-              </select>
-            </label>
-          </section>
-
           <div class="form-actions">
-            <button class="submit" type="submit" :disabled="loading">
-              <span class="submit-label">
-                <svg
-                  v-if="loading"
-                  class="spinner"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="12" r="9" stroke-width="3" />
-                </svg>
-                {{ loading ? "研究进行中..." : "开始研究" }}
-              </span>
+            <button
+              class="primary-btn"
+              type="submit"
+              :disabled="creating || !topicInput.trim()"
+            >
+              {{ creating ? "检索中..." : "创建调研会话" }}
             </button>
             <button
-              v-if="loading"
+              v-if="creating"
+              class="ghost-btn"
               type="button"
-              class="secondary-btn"
-              @click="cancelResearch"
+              @click="cancelCurrentStream"
             >
-              取消研究
+              取消
             </button>
           </div>
         </form>
 
-        <p v-if="error" class="error-chip">
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path
-              d="M10 3.2c-.3 0-.6.2-.8.5L3.4 15c-.4.7.1 1.6.8 1.6h11.6c.7 0 1.2-.9.8-1.6L10.8 3.7c-.2-.3-.5-.5-.8-.5Zm0 4.3c.4 0 .7.3.7.7v4c0 .4-.3.7-.7.7s-.7-.3-.7-.7V8.2c0-.4.3-.7.7-.7Zm0 6.6a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"
-            />
-          </svg>
-          {{ error }}
-        </p>
-        <p v-else-if="loading" class="hint muted">
-          正在收集线索与证据，实时进展见右侧区域。
-        </p>
-      </section>
-    </div>
-
-    <!-- 全屏状态：左右分栏布局 -->
-    <div v-else class="layout layout-fullscreen">
-      <!-- 左侧：研究信息 -->
-      <aside class="sidebar">
-        <div class="sidebar-header">
-          <button class="back-btn" @click="goBack" :disabled="loading">
-            <svg viewBox="0 0 24 24" width="20" height="20">
-              <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            返回
-          </button>
-          <h2>🔍 深度研究助手</h2>
-        </div>
-
-        <div class="research-info">
-          <div class="info-item">
-            <label>研究主题</label>
-            <p class="topic-display">{{ form.topic }}</p>
-          </div>
-
-          <div class="info-item" v-if="form.searchApi">
-            <label>搜索引擎</label>
-            <p>{{ form.searchApi }}</p>
-          </div>
-
-          <div class="info-item" v-if="totalTasks > 0">
-            <label>研究进度</label>
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: `${(completedTasks / totalTasks) * 100}%` }"></div>
-            </div>
-            <p class="progress-text">{{ completedTasks }} / {{ totalTasks }} 任务完成</p>
-          </div>
-        </div>
-
-        <div class="sidebar-actions">
-          <button class="new-research-btn" @click="startNewResearch">
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
-            </svg>
-            开始新研究
-          </button>
-        </div>
-      </aside>
-
-      <!-- 右侧：研究结果 -->
-      <section
-        class="panel panel-result"
-        v-if="todoTasks.length || reportMarkdown || progressLogs.length"
-      >
-        <header class="status-bar">
-          <div class="status-main">
-            <div class="status-chip" :class="{ active: loading }">
-              <span class="dot"></span>
-              {{ loading ? "研究进行中" : "研究流程完成" }}
-            </div>
-            <span class="status-meta">
-              任务进度：{{ completedTasks }} / {{ totalTasks || todoTasks.length || 1 }}
-              · 阶段记录 {{ progressLogs.length }} 条
-            </span>
-          </div>
-          <div class="status-controls">
-            <button class="secondary-btn" @click="logsCollapsed = !logsCollapsed">
-              {{ logsCollapsed ? "展开流程" : "收起流程" }}
+        <section class="side-block">
+          <div class="section-title">
+            <h2>历史会话</h2>
+            <button class="text-btn" type="button" @click="loadSessions()">
+              刷新
             </button>
           </div>
-        </header>
-
-        <div class="timeline-wrapper" v-show="!logsCollapsed && progressLogs.length">
-          <transition-group name="timeline" tag="ul" class="timeline">
-            <li v-for="(log, index) in progressLogs" :key="`${log}-${index}`">
-              <span class="timeline-node"></span>
-              <p>{{ log }}</p>
-            </li>
-          </transition-group>
-        </div>
-
-        <div class="tasks-section" v-if="todoTasks.length">
-          <aside class="tasks-list">
-            <h3>任务清单</h3>
-            <ul>
-              <li
-                v-for="task in todoTasks"
-                :key="task.id"
-                :class="['task-item', { active: task.id === activeTaskId, completed: task.status === 'completed' }]"
+          <p v-if="!sessions.length" class="muted">暂无历史记录</p>
+          <div v-else class="session-list">
+            <article
+              v-for="session in sessions"
+              :key="session.id"
+              class="session-item"
+              :class="{ active: currentSession?.id === session.id }"
+            >
+              <button
+                class="session-select"
+                type="button"
+                @click="loadSession(session.id)"
               >
-                <button
-                  type="button"
-                  class="task-button"
-                  @click="activeTaskId = task.id"
-                >
-                  <span class="task-title">{{ task.title }}</span>
-                  <span class="task-status" :class="task.status">
-                    {{ formatTaskStatus(task.status) }}
+                <div class="session-topline">
+                  <h3>{{ session.topic }}</h3>
+                  <span :class="['session-status', session.status]">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    <span>{{ sessionStatusLabel(session.status) }}</span>
                   </span>
-                </button>
-                <p class="task-intent">{{ task.intent }}</p>
-              </li>
-            </ul>
-          </aside>
-
-          <article class="task-detail" v-if="currentTask">
-            <header class="task-header">
-              <div>
-                <h3>{{ currentTaskTitle || "当前任务" }}</h3>
-                <p class="muted" v-if="currentTaskIntent">
-                  {{ currentTaskIntent }}
+                </div>
+                <p class="session-meta">
+                  {{ session.selected_count }} / {{ session.paper_count }} 篇 ·
+                  {{ formatDate(session.updated_at || session.created_at) }}
                 </p>
-              </div>
-              <div class="task-chip-group">
-                <span class="task-label">查询：{{ currentTaskQuery || "" }}</span>
-                <span
-                  v-if="currentTaskNoteId"
-                  class="task-label note-chip"
-                  :title="currentTaskNoteId"
-                >
-                  笔记：{{ currentTaskNoteId }}
-                </span>
-                <span
-                  v-if="currentTaskNotePath"
-                  class="task-label note-chip path-chip"
-                  :title="currentTaskNotePath"
-                >
-                  <span class="path-label">路径：</span>
-                  <span class="path-text">{{ currentTaskNotePath }}</span>
-                  <button
-                    class="chip-action"
-                    type="button"
-                    @click="copyNotePath(currentTaskNotePath)"
-                  >
-                    复制
-                  </button>
-                </span>
-              </div>
-            </header>
+              </button>
+              <button
+                class="session-delete"
+                type="button"
+                aria-label="删除历史会话"
+                @click.stop="openDeleteDialog(session)"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            </article>
+          </div>
+        </section>
 
-            <section v-if="currentTask && currentTask.notices.length" class="task-notices">
-              <h4>系统提示</h4>
-              <ul>
-                <li v-for="(notice, idx) in currentTask.notices" :key="`${notice}-${idx}`">
-                  {{ notice }}
-                </li>
-              </ul>
-            </section>
+        <section class="side-block">
+          <div class="section-title">
+            <h2>流程记录</h2>
+            <div class="side-actions">
+              <button
+                v-if="progressLogs.length > 5"
+                class="text-btn"
+                type="button"
+                @click="showAllLogs = !showAllLogs"
+              >
+                {{ showAllLogs ? "收起" : "全部" }}
+              </button>
+              <button class="text-btn" type="button" @click="progressLogs = []">
+                清空
+              </button>
+            </div>
+          </div>
+          <ol v-if="visibleProgressLogs.length" class="progress-list">
+            <li v-for="(log, index) in visibleProgressLogs" :key="`${log}-${index}`">
+              {{ log }}
+            </li>
+          </ol>
+          <p v-else class="muted">等待新的调研任务</p>
+        </section>
+      </div>
+    </aside>
 
-            <section
-              class="sources-block"
-              :class="{ 'block-highlight': sourcesHighlight }"
-            >
-              <h3>最新来源</h3>
-              <template v-if="currentTaskSources.length">
-                <ul class="sources-list">
-                  <li
-                    v-for="(item, index) in currentTaskSources"
-                    :key="`${item.title}-${index}`"
-                    class="source-item"
-                  >
-                    <a
-                      class="source-link"
-                      :href="item.url || '#'"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {{ item.title || item.url || `来源 ${index + 1}` }}
-                    </a>
-                    <div v-if="item.snippet || item.raw" class="source-tooltip">
-                      <p v-if="item.snippet">{{ item.snippet }}</p>
-                      <p v-if="item.raw" class="muted-text">{{ item.raw }}</p>
-                    </div>
-                  </li>
-                </ul>
-              </template>
-              <p v-else class="muted">暂无可用来源</p>
-            </section>
-
-            <section
-              class="summary-block"
-              :class="{ 'block-highlight': summaryHighlight }"
-            >
-              <h3>任务总结</h3>
-              <pre class="block-pre">{{ currentTaskSummary || "暂无可用信息" }}</pre>
-            </section>
-
-            <section
-              class="tools-block"
-              :class="{ 'block-highlight': toolHighlight }"
-              v-if="currentTaskToolCalls.length"
-            >
-              <h3>工具调用记录</h3>
-              <ul class="tool-list">
-                <li
-                  v-for="entry in currentTaskToolCalls"
-                  :key="`${entry.eventId}-${entry.timestamp}`"
-                  class="tool-entry"
-                >
-                  <div class="tool-entry-header">
-                    <span class="tool-entry-title">
-                      #{{ entry.eventId }} {{ entry.agent }} → {{ entry.tool }}
-                    </span>
-                    <span
-                      v-if="entry.noteId"
-                      class="tool-entry-note"
-                    >
-                      笔记：{{ entry.noteId }}
-                    </span>
-                  </div>
-                  <p v-if="entry.notePath" class="tool-entry-path">
-                    笔记路径：
-                    <button
-                      class="link-btn"
-                      type="button"
-                      @click="copyNotePath(entry.notePath)"
-                    >
-                      复制
-                    </button>
-                    <span class="path-text">{{ entry.notePath }}</span>
-                  </p>
-                  <p class="tool-subtitle">参数</p>
-                  <pre class="tool-pre">{{ formatToolParameters(entry.parameters) }}</pre>
-                  <template v-if="entry.result">
-                    <p class="tool-subtitle">执行结果</p>
-                    <pre class="tool-pre">{{ formatToolResult(entry.result) }}</pre>
-                  </template>
-                </li>
-              </ul>
-            </section>
-          </article>
-
-          <article class="task-detail" v-else>
-            <p class="muted">等待任务规划或执行结果。</p>
-          </article>
+    <section class="center-stage">
+      <header class="stage-header">
+        <div class="stage-heading">
+          <div class="stage-heading-top">
+            <p class="eyebrow">Literature Focus</p>
+            <span v-if="currentSession" class="status-pill subtle">
+              {{ sessionStatusLabel(currentSession.status) }}
+            </span>
+          </div>
+          <h2 :title="currentSession?.topic || ''">
+            {{ currentSession?.topic || "请选择或创建一个调研会话" }}
+          </h2>
+          <div v-if="currentSession" class="stage-meta-stack">
+            <p class="stage-meta-line">{{ currentSessionSummaryText }}</p>
+          </div>
         </div>
 
-        <div
-          v-if="reportMarkdown"
-          class="report-block"
-          :class="{ 'block-highlight': reportHighlight }"
+        <div v-if="currentSession" class="stage-actions">
+          <button
+            class="primary-btn"
+            type="button"
+            :disabled="reporting || !confirmedCount"
+            @click="generateReport"
+          >
+            {{ reporting ? "生成中..." : "生成研究报告" }}
+          </button>
+          <button class="secondary-btn" type="button" @click="openReportPanel">
+            打开研究报告
+          </button>
+        </div>
+      </header>
+
+      <p v-if="error" class="banner error-banner">{{ error }}</p>
+
+      <section
+        v-if="currentSession && (degradationNotices.length || queryTasks.length)"
+        class="process-strip"
+      >
+        <div class="process-summary" :title="currentSessionSourceText">
+          <span class="process-label">Sources</span>
+          <span class="process-text">{{ currentSessionSourceText }}</span>
+        </div>
+
+        <details v-if="degradationNotices.length" class="process-detail compact-banner warning-banner">
+          <summary>
+            <span class="process-detail-label">降级提示</span>
+            <span class="process-detail-count">{{ degradationNotices.length }}</span>
+          </summary>
+          <ul>
+            <li v-for="notice in degradationNotices" :key="notice">{{ notice }}</li>
+          </ul>
+        </details>
+
+        <details
+          v-if="queryTasks.length"
+          class="process-detail query-board"
+          :open="queryBoardOpen"
+          @toggle="handleQueryBoardToggle"
         >
-          <h3>最终报告</h3>
-          <pre class="block-pre">{{ reportMarkdown }}</pre>
-        </div>
+          <summary>
+            <span class="process-detail-label">检索子任务</span>
+            <span class="process-detail-count">{{ queryTasks.length }}</span>
+          </summary>
+
+          <div class="query-grid">
+            <article v-for="task in queryTasks" :key="task.subtask_id" class="query-card">
+              <div class="query-card-head">
+                <div>
+                  <h3>{{ task.concept }}</h3>
+                  <p class="muted">{{ task.intent }}</p>
+                </div>
+                <span class="query-status">{{ queryStatusLabel(task.status) }}</span>
+              </div>
+              <div class="term-list">
+                <span v-for="term in task.base_terms" :key="`${task.subtask_id}-${term}`">
+                  {{ term }}
+                </span>
+              </div>
+              <ul class="variant-list">
+                <li v-for="variant in task.variants" :key="variant.query_id">
+                  <div class="variant-head">
+                    <strong>{{ queryTypeLabel(variant.query_type) }}</strong>
+                    <span>{{ queryStatusLabel(variant.status) }} · {{ variant.result_count }} 条</span>
+                  </div>
+                  <code>{{ variant.query_text }}</code>
+                  <p class="muted">
+                    ✓ {{ formatSources(variant.sources_succeeded) }} ·
+                    ⊘ {{ formatSourceReasons(variant.sources_skipped) }} ·
+                    ✕ {{ formatSourceReasons(variant.sources_failed) }}
+                  </p>
+                </li>
+              </ul>
+            </article>
+          </div>
+        </details>
       </section>
 
+      <section v-if="currentSession" class="filter-bar">
+        <label class="search-control">
+          <span>搜索</span>
+          <input
+            v-model="filters.keyword"
+            type="search"
+            placeholder="标题、摘要、作者"
+          />
+        </label>
+        <label>
+          <span>相关性</span>
+          <select v-model="filters.label">
+            <option value="">全部</option>
+            <option value="must_read">核心</option>
+            <option value="frontier">前沿</option>
+            <option value="background">背景</option>
+            <option value="adjacent">旁支</option>
+            <option value="candidate">候选</option>
+          </select>
+        </label>
+        <label>
+          <span>状态</span>
+          <select v-model="filters.status">
+            <option value="">全部</option>
+            <option value="included">已确认</option>
+            <option value="to_read">待读</option>
+            <option value="saved">收藏</option>
+            <option value="candidate">候选</option>
+            <option value="excluded">已排除</option>
+          </select>
+        </label>
+        <label>
+          <span>年份</span>
+          <select v-model="filters.year">
+            <option value="">全部</option>
+            <option value="2025">2025+</option>
+            <option value="2024">2024+</option>
+            <option value="2022">2022+</option>
+            <option value="2020">2020+</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="paper-stage">
+        <div class="section-title">
+          <div>
+            <h2>参考文献</h2>
+            <p class="muted" v-if="currentSession">
+              {{ filteredPapers.length }} / {{ papers.length }} 篇
+            </p>
+          </div>
+        </div>
+
+        <div v-if="currentSession && filteredPapers.length" class="paper-list">
+          <article
+            v-for="paper in filteredPapers"
+            :key="paper.id"
+            class="paper-row"
+            :class="{
+              active: activePaper?.id === paper.id,
+              excluded: paper.user_status === 'excluded'
+            }"
+            @click="selectPaper(paper.id)"
+          >
+            <div class="paper-rank">#{{ paper.rank }}</div>
+            <div class="paper-main">
+              <div class="paper-title-row">
+                <h3>{{ paper.title }}</h3>
+                <span class="paper-year">{{ paper.year || "n.d." }}</span>
+              </div>
+              <p class="paper-authors">{{ compactAuthors(paper.authors) }}</p>
+              <div class="paper-tags">
+                <span :class="['label-chip', paper.relevance_label]">
+                  {{ relevanceLabel(paper.relevance_label) }}
+                </span>
+                <span v-for="tag in paper.tags" :key="`${paper.id}-${tag}`">
+                  {{ tag }}
+                </span>
+                <span>{{ paper.source || "unknown" }}</span>
+              </div>
+              <p class="paper-summary">{{ paper.ai_reason }}</p>
+            </div>
+            <div class="paper-side" @click.stop>
+              <button class="text-btn" type="button" @click="selectPaper(paper.id)">
+                查看
+              </button>
+              <label class="toggle-select">
+                <input
+                  type="checkbox"
+                  :checked="paper.selected && paper.user_status !== 'excluded'"
+                  @change="togglePaperSelection(paper)"
+                />
+                纳入
+              </label>
+            </div>
+          </article>
+        </div>
+
+        <div v-else-if="currentSession" class="empty-state">
+          <p>当前筛选条件下没有文献。</p>
+          <p class="muted">放宽年份、状态或关键词后再看一轮。</p>
+        </div>
+
+        <div v-else class="empty-state">
+          <p>先创建一个调研会话。</p>
+          <p class="muted">文献妙妙屋会把检索、筛选、精读和研究报告集中到同一工作台里。</p>
+        </div>
+      </section>
+    </section>
+
+    <aside class="right-rail">
+      <div class="rail-top right-top">
+        <div v-if="rightSidebarOpen" class="panel-switch">
+          <button
+            type="button"
+            :class="{ active: rightPanelTab === 'detail' }"
+            @click="showDetailTab"
+          >
+            文献详情
+          </button>
+          <button
+            type="button"
+            :class="{ active: rightPanelTab === 'report' }"
+            @click="showReportTab"
+          >
+            研究报告
+          </button>
+        </div>
+        <button
+          class="rail-toggle right-handle"
+          type="button"
+          :aria-label="rightSidebarOpen ? '收起右侧栏' : '展开右侧栏'"
+          @click="toggleRightSidebar"
+        >
+          <span class="handle-dots" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span
+            class="handle-arrow"
+            :class="{ collapsed: !rightSidebarOpen }"
+            aria-hidden="true"
+          ></span>
+        </button>
+      </div>
+
+      <div v-if="rightSidebarOpen" class="right-body">
+        <section
+          v-if="rightPanelTab === 'detail'"
+          ref="detailScrollRef"
+          class="panel-scroll"
+        >
+          <template v-if="activePaper">
+            <div class="detail-hero">
+              <div class="detail-heading">
+                <div class="detail-heading-top">
+                  <p class="eyebrow">Paper Detail</p>
+                  <span class="score-pill">{{ Math.round(activePaper.final_score * 100) }}</span>
+                </div>
+                <h2>{{ activePaper.title }}</h2>
+                <p class="detail-authors">{{ compactAuthors(activePaper.authors) }}</p>
+                <div class="detail-meta-line">
+                  <span>{{ activePaper.year || "n.d." }}</span>
+                  <span>{{ activePaper.venue || "Unknown venue" }}</span>
+                  <span>{{ activePaper.citation_count }} citations</span>
+                  <span>{{ activePaper.source || "unknown" }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-actions">
+              <a
+                v-if="activePaperLink"
+                class="primary-link"
+                :href="activePaperLink"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                打开论文
+              </a>
+              <a
+                v-if="currentSession"
+                class="secondary-link"
+                :href="exportBibtexHref"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                导出 BibTeX
+              </a>
+            </div>
+
+            <div class="status-actions">
+              <button
+                type="button"
+                :class="{ active: activePaper.user_status === 'included' }"
+                @click="setPaperStatus(activePaper, 'included')"
+              >
+                确认
+              </button>
+              <button
+                type="button"
+                :class="{ active: activePaper.user_status === 'to_read' }"
+                @click="setPaperStatus(activePaper, 'to_read')"
+              >
+                待读
+              </button>
+              <button
+                type="button"
+                :class="{ active: activePaper.user_status === 'saved' }"
+                @click="setPaperStatus(activePaper, 'saved')"
+              >
+                收藏
+              </button>
+              <button
+                type="button"
+                :class="{ danger: activePaper.user_status === 'excluded' }"
+                @click="setPaperStatus(activePaper, 'excluded')"
+              >
+                排除
+              </button>
+            </div>
+
+            <section class="detail-block detail-block-primary">
+              <div class="section-title detail-section-title">
+                <h3>摘要</h3>
+                <span :class="['label-chip', activePaper.relevance_label]">
+                  {{ relevanceLabel(activePaper.relevance_label) }}
+                </span>
+              </div>
+              <p class="reading-copy">
+                {{ activePaper.abstract || "暂无摘要。请打开论文链接进一步确认。" }}
+              </p>
+              <div class="ai-note">
+                <span class="ai-note-label">AI 判断</span>
+                <p>{{ activePaper.ai_reason }}</p>
+              </div>
+            </section>
+
+            <section class="detail-block detail-block-secondary">
+              <div class="section-title detail-section-title">
+                <h3>引用</h3>
+              </div>
+              <div class="cite-box">
+                <p class="cite-text">{{ activePaperCitation }}</p>
+                <div class="cite-actions">
+                  <button class="text-btn" type="button" @click="copyCitation(activePaper)">
+                    复制参考格式
+                  </button>
+                  <a
+                    class="secondary-link"
+                    :href="exportBibtexHref"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    BibTeX
+                  </a>
+                </div>
+              </div>
+            </section>
+
+            <section v-if="activePaper.query_matches.length" class="detail-block">
+              <div class="section-title detail-section-title">
+                <h3>检索命中</h3>
+              </div>
+              <ul class="match-list">
+                <li
+                  v-for="match in activePaper.query_matches"
+                  :key="`${activePaper.id}-${match.subtask_id}-${match.query_type}-${match.source}`"
+                >
+                  <strong>{{ match.concept }}</strong>
+                  <span>{{ queryTypeLabel(match.query_type) }} · {{ match.source }}</span>
+                  <code>{{ match.query_text }}</code>
+                </li>
+              </ul>
+            </section>
+
+            <form class="derive-form" @submit.prevent="deriveFromActivePaper">
+              <label>
+                <span>派生新会话</span>
+                <input
+                  v-model="deriveTopic"
+                  type="text"
+                  :placeholder="`围绕 ${activePaper.title.slice(0, 28)}... 继续深挖`"
+                />
+              </label>
+              <button class="secondary-btn" type="submit" :disabled="!deriveTopic.trim()">
+                派生
+              </button>
+            </form>
+          </template>
+
+          <div v-else class="empty-state inset">
+            <p>选择一篇论文查看详情。</p>
+            <p class="muted">右侧会显示摘要、引用、命中的检索子任务和派生入口。</p>
+          </div>
+        </section>
+
+        <section
+          v-else
+          ref="reportScrollRef"
+          class="panel-scroll"
+        >
+          <div class="report-hero">
+            <div>
+              <p class="eyebrow">Research Report</p>
+              <h2>{{ reportHeading }}</h2>
+              <p class="muted report-summary">基于当前已确认文献的研究备忘录</p>
+            </div>
+            <span v-if="confirmedCount" class="memo-badge">{{ confirmedCount }} 篇已确认</span>
+          </div>
+
+          <template v-if="reportSections.length">
+            <nav class="report-toc">
+              <button
+                v-for="section in reportSections"
+                :key="section.id"
+                type="button"
+                @click="scrollReportTo(section.id)"
+              >
+                {{ section.title }}
+              </button>
+            </nav>
+
+            <article class="report-article">
+              <section
+                v-for="section in reportSections"
+                :id="section.id"
+                :key="section.id"
+                :data-section-id="section.id"
+                class="report-section"
+              >
+                <h3>{{ section.title }}</h3>
+                <div class="report-items">
+                  <div
+                    v-for="(item, index) in section.items"
+                    :key="`${section.id}-${index}`"
+                    class="report-item"
+                    :class="[item.kind, item.tone ?? 'plain']"
+                  >
+                    <span v-if="item.kind === 'ordered'" class="report-order">
+                      {{ item.order }}
+                    </span>
+                    <span v-if="item.tone" class="tone-chip">
+                      {{ reportToneLabel(item.tone) }}
+                    </span>
+                    <p>{{ item.text }}</p>
+                  </div>
+                </div>
+              </section>
+            </article>
+          </template>
+
+          <pre v-else-if="currentReportMarkdown" class="report-draft">{{ currentReportMarkdown }}</pre>
+
+          <div v-else class="empty-state inset">
+            <p>研究报告会基于已确认文献生成。</p>
+            <p class="muted">先确认论文，再生成一版可供判断方向、空白和下一步动作的报告。</p>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <div
+      v-if="deleteTargetSession"
+      class="dialog-backdrop"
+      @click.self="closeDeleteDialog"
+    >
+      <section class="dialog-panel">
+        <p class="eyebrow">Delete Session</p>
+        <h2>确认删除这个历史会话？</h2>
+        <p class="dialog-copy">
+          <strong>{{ deleteTargetSession.topic }}</strong>
+          的论文选择、标签和报告记录都会一起删除，且无法恢复。
+        </p>
+        <div class="dialog-actions">
+          <button class="ghost-btn" type="button" @click="closeDeleteDialog">
+            取消
+          </button>
+          <button
+            class="danger-btn"
+            type="button"
+            :disabled="deletingSessionId === deleteTargetSession.id"
+            @click="confirmDeleteSession"
+          >
+            {{ deletingSessionId === deleteTargetSession.id ? "删除中..." : "确认删除" }}
+          </button>
+        </div>
+      </section>
     </div>
   </main>
 </template>
 
 <script lang="ts" setup>
-import { computed, onBeforeUnmount, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import {
-  runResearchStream,
-  type ResearchStreamEvent
+  createSessionStream,
+  deleteSession as deleteSessionRequest,
+  deriveSession,
+  exportUrl,
+  generateReportStream,
+  getSession,
+  listSessions,
+  updateSessionPaper,
+  type ResearchQueryTask,
+  type ResearchReport,
+  type ResearchSession,
+  type ScholarlyPaper,
+  type StreamEvent
 } from "./services/api";
 
-interface SourceItem {
+type RightPanelTab = "detail" | "report";
+type ReportTone = "evidence" | "judgment" | "speculation" | "action" | "note";
+type ReportItemKind = "paragraph" | "bullet" | "ordered";
+
+interface ReportItem {
+  kind: ReportItemKind;
+  text: string;
+  order?: string;
+  tone?: ReportTone;
+}
+
+interface ReportSection {
+  id: string;
   title: string;
-  url: string;
-  snippet: string;
-  raw: string;
+  items: ReportItem[];
 }
 
-interface ToolCallLog {
-  eventId: number;
-  agent: string;
-  tool: string;
-  parameters: Record<string, unknown>;
-  result: string;
-  noteId: string | null;
-  notePath: string | null;
-  timestamp: number;
-}
+const APP_TITLE = "文献妙妙屋";
+const LEFT_PANEL_KEY = "miaowen:left-panel";
+const RIGHT_PANEL_KEY = "miaowen:right-panel";
+const QUERY_BOARD_KEY = "miaowen:query-board";
 
-interface TodoTaskView {
-  id: number;
-  title: string;
-  intent: string;
-  query: string;
-  status: string;
-  summary: string;
-  sourcesSummary: string;
-  sourceItems: SourceItem[];
-  notices: string[];
-  noteId: string | null;
-  notePath: string | null;
-  toolCalls: ToolCallLog[];
-}
-
-const form = reactive({
-  topic: "",
-  searchApi: ""
-});
-
-const loading = ref(false);
-const error = ref("");
+const sessions = ref<ResearchSession[]>([]);
+const currentSession = ref<ResearchSession | null>(null);
+const activePaperId = ref<string | null>(null);
+const topicInput = ref("");
+const deriveTopic = ref("");
 const progressLogs = ref<string[]>([]);
-const logsCollapsed = ref(false);
-const isExpanded = ref(false);
+const error = ref("");
+const creating = ref(false);
+const reporting = ref(false);
+const reportText = ref("");
+const showAllLogs = ref(false);
+const leftSidebarOpen = ref(readStoredBoolean(LEFT_PANEL_KEY, true));
+const rightSidebarOpen = ref(readStoredBoolean(RIGHT_PANEL_KEY, true));
+const queryBoardOpen = ref(readStoredBoolean(QUERY_BOARD_KEY, false));
+const rightPanelTab = ref<RightPanelTab>("detail");
+const deleteTargetSession = ref<ResearchSession | null>(null);
+const deletingSessionId = ref<string | null>(null);
 
-const todoTasks = ref<TodoTaskView[]>([]);
-const activeTaskId = ref<number | null>(null);
-const reportMarkdown = ref("");
-
-const summaryHighlight = ref(false);
-const sourcesHighlight = ref(false);
-const reportHighlight = ref(false);
-const toolHighlight = ref(false);
+const filters = reactive({
+  keyword: "",
+  label: "",
+  status: "",
+  year: ""
+});
 
 let currentController: AbortController | null = null;
+const detailScrollRef = ref<HTMLElement | null>(null);
+const reportScrollRef = ref<HTMLElement | null>(null);
 
-const searchOptions = [
-  "advanced",
-  "duckduckgo",
-  "tavily",
-  "perplexity",
-  "searxng"
-];
-
-const TASK_STATUS_LABEL: Record<string, string> = {
-  pending: "待执行",
-  in_progress: "进行中",
-  completed: "已完成",
-  skipped: "已跳过"
-};
-
-function formatTaskStatus(status: string): string {
-  return TASK_STATUS_LABEL[status] ?? status;
-}
-
-const totalTasks = computed(() => todoTasks.value.length);
-const completedTasks = computed(() =>
-  todoTasks.value.filter((task) => task.status === "completed").length
+const papers = computed(() => currentSession.value?.papers ?? []);
+const latestReport = computed<ResearchReport | null>(
+  () => currentSession.value?.reports?.[0] ?? null
 );
-
-const currentTask = computed(() => {
-  if (activeTaskId.value !== null) {
-    return todoTasks.value.find((task) => task.id === activeTaskId.value) ?? null;
-  }
-  return todoTasks.value[0] ?? null;
-});
-
-const currentTaskSources = computed(() => currentTask.value?.sourceItems ?? []);
-const currentTaskSummary = computed(() => currentTask.value?.summary ?? "");
-const currentTaskTitle = computed(() => currentTask.value?.title ?? "");
-const currentTaskIntent = computed(() => currentTask.value?.intent ?? "");
-const currentTaskQuery = computed(() => currentTask.value?.query ?? "");
-const currentTaskNoteId = computed(() => currentTask.value?.noteId ?? "");
-const currentTaskNotePath = computed(() => currentTask.value?.notePath ?? "");
-const currentTaskToolCalls = computed(
-  () => currentTask.value?.toolCalls ?? []
+const queryTasks = computed(() =>
+  normalizeQueryTasks(currentSession.value?.queries ?? [])
 );
-
-const pulse = (flag: typeof summaryHighlight) => {
-  flag.value = false;
-  requestAnimationFrame(() => {
-    flag.value = true;
-    window.setTimeout(() => {
-      flag.value = false;
-    }, 1200);
-  });
-};
-
-function parseSources(raw: string): SourceItem[] {
-  if (!raw) {
-    return [];
-  }
-
-  const items: SourceItem[] = [];
-  const lines = raw.split("\n");
-
-  let current: SourceItem | null = null;
-  const truncate = (value: string, max = 360) => {
-    const trimmed = value.trim();
-    return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
-  };
-
-  const flush = () => {
-    if (!current) {
-      return;
-    }
-    const normalized: SourceItem = {
-      title: current.title?.trim() || "",
-      url: current.url?.trim() || "",
-      snippet: current.snippet ? truncate(current.snippet) : "",
-      raw: current.raw ? truncate(current.raw, 420) : ""
-    };
-
-    if (
-      normalized.title ||
-      normalized.url ||
-      normalized.snippet ||
-      normalized.raw
-    ) {
-      if (!normalized.title && normalized.url) {
-        normalized.title = normalized.url;
-      }
-      items.push(normalized);
-    }
-    current = null;
-  };
-
-  const ensureCurrent = () => {
-    if (!current) {
-      current = { title: "", url: "", snippet: "", raw: "" };
-    }
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    if (/^\*/.test(trimmed) && trimmed.includes(" : ")) {
-      flush();
-      const withoutBullet = trimmed.replace(/^\*\s*/, "");
-      const [titlePart, urlPart] = withoutBullet.split(" : ");
-      current = {
-        title: titlePart?.trim() || "",
-        url: urlPart?.trim() || "",
-        snippet: "",
-        raw: ""
-      };
-      continue;
-    }
-
-    if (/^(Source|信息来源)\s*:/.test(trimmed)) {
-      flush();
-      const [, titlePart = ""] = trimmed.split(/:\s*(.+)/);
-      current = {
-        title: titlePart.trim(),
-        url: "",
-        snippet: "",
-        raw: ""
-      };
-      continue;
-    }
-
-    if (/^URL\s*:/.test(trimmed)) {
-      ensureCurrent();
-      const [, urlPart = ""] = trimmed.split(/:\s*(.+)/);
-      current!.url = urlPart.trim();
-      continue;
-    }
-
-    if (
-      /^(Most relevant content from source|信息内容)\s*:/.test(trimmed)
-    ) {
-      ensureCurrent();
-      const [, contentPart = ""] = trimmed.split(/:\s*(.+)/);
-      current!.snippet = contentPart.trim();
-      continue;
-    }
-
-    if (
-      /^(Full source content limited to|信息内容限制为)\s*:/.test(trimmed)
-    ) {
-      ensureCurrent();
-      const [, rawPart = ""] = trimmed.split(/:\s*(.+)/);
-      current!.raw = rawPart.trim();
-      continue;
-    }
-
-    if (/^https?:\/\//.test(trimmed)) {
-      ensureCurrent();
-      if (!current!.url) {
-        current!.url = trimmed;
-        continue;
-      }
-    }
-
-    ensureCurrent();
-    current!.raw = current!.raw ? `${current!.raw}\n${trimmed}` : trimmed;
-  }
-
-  flush();
-  return items;
-}
-
-function extractOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
+const degradationNotices = computed(
+  () => currentSession.value?.degradation_notices ?? []
+);
+const confirmedCount = computed(
+  () =>
+    papers.value.filter(
+      (paper) => paper.selected && paper.user_status !== "excluded"
+    ).length
+);
+const activePaper = computed(() => {
+  if (!papers.value.length) {
     return null;
   }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function ensureRecord(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
+  return (
+    papers.value.find((paper) => paper.id === activePaperId.value) ??
+    papers.value[0]
+  );
+});
+const activePaperLink = computed(() =>
+  activePaper.value ? resolvePaperLink(activePaper.value) : null
+);
+const activePaperCitation = computed(() =>
+  activePaper.value ? buildCitationText(activePaper.value) : ""
+);
+const currentReportMarkdown = computed(
+  () => reportText.value || latestReport.value?.content_markdown || ""
+);
+const parsedReport = computed(() => parseReportMarkdown(currentReportMarkdown.value));
+const reportHeading = computed(() => parsedReport.value.title || "研究报告");
+const reportSections = computed(() => parsedReport.value.sections);
+const currentSessionSummaryText = computed(() => {
+  if (!currentSession.value) {
+    return "";
   }
-  return {};
-}
-
-function applyNoteMetadata(
-  task: TodoTaskView,
-  payload: Record<string, unknown>
-): void {
-  const noteId = extractOptionalString(payload.note_id);
-  if (noteId) {
-    task.noteId = noteId;
+  const parts = [
+    `${confirmedCount.value} / ${currentSession.value.paper_count} 已纳入`,
+    `${currentSession.value.report_count} 份报告`
+  ];
+  if (degradationNotices.value.length) {
+    parts.push(`${degradationNotices.value.length} 项降级`);
   }
-  const notePath = extractOptionalString(payload.note_path);
-  if (notePath) {
-    task.notePath = notePath;
+  return parts.join(" · ");
+});
+const currentSessionSourceText = computed(() => {
+  if (!currentSession.value) {
+    return "以文献筛选、精读和判断为中心，而不是一次性回答。";
   }
-}
+  const parts = Object.entries(currentSession.value.source_statuses ?? {}).map(
+    ([source, status]) => `${source}=${status}`
+  );
+  if (!parts.length) {
+    return "正在等待本次会话的检索与筛选元数据。";
+  }
+  return parts.join(" · ");
+});
 
-function formatToolParameters(parameters: Record<string, unknown>): string {
+const filteredPapers = computed(() => {
+  const keyword = filters.keyword.trim().toLowerCase();
+  const minYear = filters.year ? Number(filters.year) : null;
+
+  return papers.value.filter((paper) => {
+    if (filters.label && paper.relevance_label !== filters.label) {
+      return false;
+    }
+    if (filters.status && paper.user_status !== filters.status) {
+      return false;
+    }
+    if (minYear && (!paper.year || paper.year < minYear)) {
+      return false;
+    }
+    if (keyword) {
+      const haystack = [
+        paper.title,
+        paper.abstract,
+        paper.ai_reason,
+        paper.authors.join(" ")
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(keyword)) {
+        return false;
+      }
+    }
+    return true;
+  });
+});
+const visibleProgressLogs = computed(() =>
+  showAllLogs.value ? progressLogs.value : progressLogs.value.slice(-5)
+);
+
+const exportBibtexHref = computed(() =>
+  currentSession.value ? exportUrl(currentSession.value.id, "bib") : "#"
+);
+
+watch(leftSidebarOpen, (value) => persistBoolean(LEFT_PANEL_KEY, value));
+watch(rightSidebarOpen, (value) => persistBoolean(RIGHT_PANEL_KEY, value));
+watch(queryBoardOpen, (value) => persistBoolean(QUERY_BOARD_KEY, value));
+watch(
+  currentSession,
+  (session) => {
+    if (typeof document !== "undefined") {
+      document.title = session ? `${session.topic} · ${APP_TITLE}` : APP_TITLE;
+    }
+  },
+  { immediate: true }
+);
+
+onMounted(async () => {
+  await loadSessions();
+});
+
+onBeforeUnmount(() => {
+  cancelCurrentStream();
+});
+
+async function loadSessions(preferredSessionId: string | null = currentSession.value?.id ?? null) {
   try {
-    return JSON.stringify(parameters, null, 2);
-  } catch (error) {
-    console.warn("无法格式化工具参数", error, parameters);
-    return Object.entries(parameters)
-      .map(([key, value]) => `${key}: ${String(value)}`)
-      .join("\n");
-  }
-}
+    error.value = "";
+    const nextSessions = await listSessions();
+    sessions.value = nextSessions;
 
-function formatToolResult(result: string): string {
-  const trimmed = result.trim();
-  const limit = 900;
-  if (trimmed.length > limit) {
-    return `${trimmed.slice(0, limit)}…`;
-  }
-  return trimmed;
-}
+    const targetId =
+      preferredSessionId && nextSessions.some((session) => session.id === preferredSessionId)
+        ? preferredSessionId
+        : nextSessions[0]?.id ?? null;
 
-async function copyNotePath(path: string | null | undefined) {
-  if (!path) {
-    return;
-  }
+    if (!targetId) {
+      currentSession.value = null;
+      activePaperId.value = null;
+      reportText.value = "";
+      rightPanelTab.value = "detail";
+      return;
+    }
 
-  try {
-    await navigator.clipboard.writeText(path);
-    progressLogs.value.push(`已复制笔记路径：${path}`);
-  } catch (error) {
-    console.warn("无法直接复制到剪贴板", error);
-    window.prompt("复制以下笔记路径", path);
-    progressLogs.value.push("请手动复制笔记路径");
-  }
-}
+    if (!currentSession.value || currentSession.value.id !== targetId) {
+      await loadSession(targetId, { quiet: true });
+      return;
+    }
 
-function resetWorkflowState() {
-  todoTasks.value = [];
-  activeTaskId.value = null;
-  reportMarkdown.value = "";
-  progressLogs.value = [];
-  summaryHighlight.value = false;
-  sourcesHighlight.value = false;
-  reportHighlight.value = false;
-  toolHighlight.value = false;
-  logsCollapsed.value = false;
-}
-
-function findTask(taskId: unknown): TodoTaskView | undefined {
-  const numeric =
-    typeof taskId === "number"
-      ? taskId
-      : typeof taskId === "string"
-      ? Number(taskId)
-      : NaN;
-  if (Number.isNaN(numeric)) {
-    return undefined;
-  }
-  return todoTasks.value.find((task) => task.id === numeric);
-}
-
-function upsertTaskMetadata(task: TodoTaskView, payload: Record<string, unknown>) {
-  if (typeof payload.title === "string" && payload.title.trim()) {
-    task.title = payload.title.trim();
-  }
-  if (typeof payload.intent === "string" && payload.intent.trim()) {
-    task.intent = payload.intent.trim();
-  }
-  if (typeof payload.query === "string" && payload.query.trim()) {
-    task.query = payload.query.trim();
-  }
-}
-
-const handleSubmit = async () => {
-  if (!form.topic.trim()) {
-    error.value = "请输入研究主题";
-    return;
-  }
-
-  if (currentController) {
-    currentController.abort();
-    currentController = null;
-  }
-
-  loading.value = true;
-  error.value = "";
-  isExpanded.value = true;
-  resetWorkflowState();
-
-  const controller = new AbortController();
-  currentController = controller;
-
-  const payload = {
-    topic: form.topic.trim(),
-    search_api: form.searchApi || undefined
-  };
-
-  try {
-    await runResearchStream(
-      payload,
-      (event: ResearchStreamEvent) => {
-        if (event.type === "status") {
-          const message =
-            typeof event.message === "string" && event.message.trim()
-              ? event.message
-              : "流程状态更新";
-          progressLogs.value.push(message);
-
-          const payload = event as Record<string, unknown>;
-          const task = findTask(payload.task_id);
-          if (task && message) {
-            task.notices.push(message);
-            applyNoteMetadata(task, payload);
-          }
-          return;
-        }
-
-        if (event.type === "todo_list") {
-          const tasks = Array.isArray(event.tasks)
-            ? (event.tasks as Record<string, unknown>[])
-            : [];
-
-          todoTasks.value = tasks.map((item, index) => {
-            const rawId =
-              typeof item.id === "number"
-                ? item.id
-                : typeof item.id === "string"
-                ? Number(item.id)
-                : index + 1;
-            const id = Number.isFinite(rawId) ? Number(rawId) : index + 1;
-            const noteId =
-              typeof item.note_id === "string" && item.note_id.trim()
-                ? item.note_id.trim()
-                : null;
-            const notePath =
-              typeof item.note_path === "string" && item.note_path.trim()
-                ? item.note_path.trim()
-                : null;
-
-            return {
-              id,
-              title:
-                typeof item.title === "string" && item.title.trim()
-                  ? item.title.trim()
-                  : `任务${id}`,
-              intent:
-                typeof item.intent === "string" && item.intent.trim()
-                  ? item.intent.trim()
-                  : "探索与主题相关的关键信息",
-              query:
-                typeof item.query === "string" && item.query.trim()
-                  ? item.query.trim()
-                  : form.topic.trim(),
-              status:
-                typeof item.status === "string" && item.status.trim()
-                  ? item.status.trim()
-                  : "pending",
-              summary: "",
-              sourcesSummary: "",
-              sourceItems: [],
-              notices: [],
-              noteId,
-              notePath,
-              toolCalls: []
-            } as TodoTaskView;
-          });
-
-          if (todoTasks.value.length) {
-            activeTaskId.value = todoTasks.value[0].id;
-            progressLogs.value.push("已生成任务清单");
-          } else {
-            progressLogs.value.push("未生成任务清单，使用默认任务继续");
-          }
-          return;
-        }
-
-        if (event.type === "task_status") {
-          const payload = event as Record<string, unknown>;
-          const task = findTask(event.task_id);
-          if (!task) {
-            return;
-          }
-
-          upsertTaskMetadata(task, payload);
-          applyNoteMetadata(task, payload);
-          const status =
-            typeof event.status === "string" && event.status.trim()
-              ? event.status.trim()
-              : task.status;
-          task.status = status;
-
-          if (status === "in_progress") {
-            task.summary = "";
-            task.sourcesSummary = "";
-            task.sourceItems = [];
-            task.notices = [];
-            activeTaskId.value = task.id;
-            progressLogs.value.push(`开始执行任务：${task.title}`);
-          } else if (status === "completed") {
-            if (typeof event.summary === "string" && event.summary.trim()) {
-              task.summary = event.summary.trim();
-            }
-            if (
-              typeof event.sources_summary === "string" &&
-              event.sources_summary.trim()
-            ) {
-              task.sourcesSummary = event.sources_summary.trim();
-              task.sourceItems = parseSources(task.sourcesSummary);
-            }
-            progressLogs.value.push(`完成任务：${task.title}`);
-            if (activeTaskId.value === task.id) {
-              pulse(summaryHighlight);
-              pulse(sourcesHighlight);
-            }
-          } else if (status === "skipped") {
-            progressLogs.value.push(`任务跳过：${task.title}`);
-          }
-          return;
-        }
-
-        if (event.type === "sources") {
-          const payload = event as Record<string, unknown>;
-          const task = findTask(event.task_id);
-          if (!task) {
-            return;
-          }
-
-          const textCandidates = [
-            payload.latest_sources,
-            payload.sources_summary,
-            payload.raw_context
-          ];
-          const latestText = textCandidates
-            .map((value) => (typeof value === "string" ? value.trim() : ""))
-            .find((value) => value);
-
-          if (latestText) {
-            task.sourcesSummary = latestText;
-            task.sourceItems = parseSources(latestText);
-            if (activeTaskId.value === task.id) {
-              pulse(sourcesHighlight);
-            }
-            progressLogs.value.push(`已更新任务来源：${task.title}`);
-          }
-
-          if (typeof payload.backend === "string") {
-            progressLogs.value.push(
-              `当前使用搜索后端：${payload.backend}`
-            );
-          }
-
-          applyNoteMetadata(task, payload);
-
-          return;
-        }
-
-        if (event.type === "task_summary_chunk") {
-          const payload = event as Record<string, unknown>;
-          const task = findTask(event.task_id);
-          if (!task) {
-            return;
-          }
-          const chunk =
-            typeof event.content === "string" ? event.content : "";
-          task.summary += chunk;
-          applyNoteMetadata(task, payload);
-          if (activeTaskId.value === task.id) {
-            pulse(summaryHighlight);
-          }
-          return;
-        }
-
-        if (event.type === "tool_call") {
-          const payload = event as Record<string, unknown>;
-          const eventId =
-            typeof payload.event_id === "number"
-              ? payload.event_id
-              : Date.now();
-          const agent =
-            typeof payload.agent === "string" && payload.agent.trim()
-              ? payload.agent.trim()
-              : "Agent";
-          const tool =
-            typeof payload.tool === "string" && payload.tool.trim()
-              ? payload.tool.trim()
-              : "tool";
-          const parameters = ensureRecord(payload.parameters);
-          const result =
-            typeof payload.result === "string" ? payload.result : "";
-          const noteId = extractOptionalString(payload.note_id);
-          const notePath = extractOptionalString(payload.note_path);
-
-          const task = findTask(payload.task_id);
-          if (task) {
-            task.toolCalls.push({
-              eventId,
-              agent,
-              tool,
-              parameters,
-              result,
-              noteId,
-              notePath,
-              timestamp: Date.now()
-            });
-            if (noteId) {
-              task.noteId = noteId;
-            }
-            if (notePath) {
-              task.notePath = notePath;
-            }
-            const logSummary = noteId
-              ? `${agent} 调用了 ${tool}（任务 ${task.id}，笔记 ${noteId}）`
-              : `${agent} 调用了 ${tool}（任务 ${task.id}）`;
-            progressLogs.value.push(logSummary);
-            if (activeTaskId.value === task.id) {
-              pulse(toolHighlight);
-            }
-          } else {
-            progressLogs.value.push(`${agent} 调用了 ${tool}`);
-          }
-          return;
-        }
-
-        if (event.type === "final_report") {
-          const report =
-            typeof event.report === "string" && event.report.trim()
-              ? event.report.trim()
-              : "";
-          reportMarkdown.value = report || "报告生成失败，未获得有效内容";
-          pulse(reportHighlight);
-          progressLogs.value.push("最终报告已生成");
-          return;
-        }
-
-        if (event.type === "error") {
-          const detail =
-            typeof event.detail === "string" && event.detail.trim()
-              ? event.detail
-              : "研究过程中发生错误";
-          error.value = detail;
-          progressLogs.value.push("研究失败，已停止流程");
-        }
-      },
-      { signal: controller.signal }
-    );
-
-    if (!reportMarkdown.value) {
-      reportMarkdown.value = "暂无生成的报告";
+    const summary = nextSessions.find((session) => session.id === targetId);
+    if (summary && currentSession.value) {
+      currentSession.value = normalizeSession({
+        ...summary,
+        papers: currentSession.value.papers,
+        reports: currentSession.value.reports
+      });
     }
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      progressLogs.value.push("已取消当前研究任务");
-    } else {
-      error.value = err instanceof Error ? err.message : "请求失败";
+    error.value = err instanceof Error ? err.message : "无法加载历史会话";
+  }
+}
+
+async function loadSession(sessionId: string, options: { quiet?: boolean } = {}) {
+  try {
+    error.value = "";
+    const detail = await getSession(sessionId);
+    applySession(detail);
+    if (!options.quiet) {
+      pushLog(`已加载历史会话：${detail.topic}`);
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "无法加载会话";
+  }
+}
+
+async function startResearch() {
+  if (!topicInput.value.trim()) {
+    return;
+  }
+
+  cancelCurrentStream();
+  const controller = new AbortController();
+  currentController = controller;
+  creating.value = true;
+  error.value = "";
+  reportText.value = "";
+  rightSidebarOpen.value = true;
+  rightPanelTab.value = "detail";
+  progressLogs.value = [];
+  showAllLogs.value = false;
+  pushLog(`创建调研会话：${topicInput.value.trim()}`);
+
+  try {
+    await createSessionStream(topicInput.value.trim(), handleSessionEvent, {
+      signal: controller.signal
+    });
+    await loadSessions(currentSession.value?.id ?? null);
+  } catch (err) {
+    if (!(err instanceof DOMException && err.name === "AbortError")) {
+      error.value = err instanceof Error ? err.message : "创建会话失败";
     }
   } finally {
-    loading.value = false;
+    creating.value = false;
     if (currentController === controller) {
       currentController = null;
     }
   }
-};
+}
 
-const cancelResearch = () => {
-  if (!loading.value || !currentController) {
+function handleSessionEvent(event: StreamEvent) {
+  if (event.type === "session_created") {
+    applySession(event.session as ResearchSession);
+    pushLog("会话已创建");
     return;
   }
-  progressLogs.value.push("正在尝试取消当前研究任务…");
-  currentController.abort();
-};
 
-const goBack = () => {
-  if (loading.value) {
-    return; // 研究进行中不允许返回
+  if (event.type === "query_plan_generated" || event.type === "query_generated") {
+    const queries = Array.isArray(event.queries) ? event.queries : [];
+    if (currentSession.value) {
+      currentSession.value.queries = queries as Array<string | ResearchQueryTask>;
+    }
+    pushLog(`已生成 ${queries.length} 组检索式`);
+    return;
   }
-  isExpanded.value = false;
-};
 
-const startNewResearch = () => {
-  if (loading.value) {
-    cancelResearch();
+  if (event.type === "source_skipped") {
+    if (
+      currentSession.value &&
+      typeof event.source === "string" &&
+      typeof event.reason === "string"
+    ) {
+      currentSession.value.source_statuses[event.source] = event.reason;
+      if (!currentSession.value.skipped_sources.includes(event.source)) {
+        currentSession.value.skipped_sources.push(event.source);
+      }
+      const notice = `${event.source} 已跳过：${event.reason}`;
+      if (!currentSession.value.degradation_notices.includes(notice)) {
+        currentSession.value.degradation_notices.push(notice);
+      }
+    }
+    pushLog(`已跳过数据源：${String(event.source ?? "unknown")}`);
+    return;
   }
-  resetWorkflowState();
-  isExpanded.value = false;
-  form.topic = "";
-  form.searchApi = "";
-};
 
-onBeforeUnmount(() => {
+  if (event.type === "source_failed") {
+    if (
+      currentSession.value &&
+      typeof event.source === "string" &&
+      typeof event.reason === "string"
+    ) {
+      currentSession.value.source_statuses[event.source] = event.reason;
+      const notice = `${event.source} 已降级：${event.reason}`;
+      if (!currentSession.value.degradation_notices.includes(notice)) {
+        currentSession.value.degradation_notices.push(notice);
+      }
+    }
+    pushLog(`数据源降级：${String(event.source ?? "unknown")}`);
+    return;
+  }
+
+  if (event.type === "status" && typeof event.message === "string") {
+    pushLog(event.message);
+    return;
+  }
+
+  if (event.type === "papers_recalled") {
+    pushLog(`已召回 ${event.count ?? 0} 篇候选论文`);
+    return;
+  }
+
+  if (event.type === "subtask_completed") {
+    const subtask = event.subtask as ResearchQueryTask | undefined;
+    if (subtask) {
+      mergeQueryTask(subtask);
+      pushLog(`完成子任务：${subtask.concept}`);
+    }
+    return;
+  }
+
+  if (event.type === "paper_ranked") {
+    const paper = event.paper as Partial<ScholarlyPaper> | undefined;
+    if (paper?.title) {
+      pushLog(`筛选：${paper.title}`);
+    }
+    return;
+  }
+
+  if (event.type === "screening_done") {
+    applySession(event.session as ResearchSession);
+    pushLog("筛选完成，已进入工作台");
+    return;
+  }
+
+  if (event.type === "error") {
+    error.value = typeof event.detail === "string" ? event.detail : "流程失败";
+  }
+}
+
+function applySession(session: ResearchSession) {
+  const normalized = normalizeSession(session);
+  currentSession.value = normalized;
+  const hasActivePaper = normalized.papers?.some((paper) => paper.id === activePaperId.value);
+  activePaperId.value = hasActivePaper
+    ? activePaperId.value
+    : normalized.papers?.[0]?.id ?? null;
+  reportText.value = normalized.reports?.[0]?.content_markdown ?? reportText.value;
+  syncSessionListSummary();
+  if (rightPanelTab.value === "detail") {
+    scrollRightPanelToTop("detail");
+  }
+}
+
+function selectPaper(paperId: string) {
+  activePaperId.value = paperId;
+  rightSidebarOpen.value = true;
+  rightPanelTab.value = "detail";
+  scrollRightPanelToTop("detail");
+}
+
+async function togglePaperSelection(paper: ScholarlyPaper) {
+  const selected = !(paper.selected && paper.user_status !== "excluded");
+  await patchPaper(paper, {
+    selected,
+    user_status: selected ? "included" : "candidate"
+  });
+}
+
+async function setPaperStatus(paper: ScholarlyPaper, status: string) {
+  await patchPaper(paper, { user_status: status });
+}
+
+async function patchPaper(
+  paper: ScholarlyPaper,
+  payload: { user_status?: string; selected?: boolean; tags?: string[] }
+) {
+  if (!currentSession.value) {
+    return;
+  }
+
+  try {
+    const updated = await updateSessionPaper(currentSession.value.id, paper.id, payload);
+    const index = papers.value.findIndex((item) => item.id === updated.id);
+    if (index >= 0 && currentSession.value.papers) {
+      currentSession.value.papers[index] = normalizePaper(updated);
+      syncCurrentSessionCounters();
+      syncSessionListSummary();
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "更新论文状态失败";
+  }
+}
+
+async function generateReport() {
+  if (!currentSession.value) {
+    return;
+  }
+
+  const sessionId = currentSession.value.id;
+  reporting.value = true;
+  error.value = "";
+  reportText.value = "";
+  rightSidebarOpen.value = true;
+  rightPanelTab.value = "report";
+  scrollRightPanelToTop("report");
+  pushLog("开始生成研究报告");
+
+  try {
+    await generateReportStream(sessionId, handleReportEvent);
+    const detail = await getSession(sessionId);
+    applySession(detail);
+    await loadSessions(sessionId);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "生成报告失败";
+  } finally {
+    reporting.value = false;
+  }
+}
+
+function handleReportEvent(event: StreamEvent) {
+  if (event.type === "report_chunk" && typeof event.content === "string") {
+    reportText.value += event.content;
+  }
+  if (event.type === "report_done") {
+    pushLog("研究报告已保存");
+  }
+  if (event.type === "error") {
+    error.value = typeof event.detail === "string" ? event.detail : "生成报告失败";
+  }
+}
+
+async function deriveFromActivePaper() {
+  if (!currentSession.value || !deriveTopic.value.trim()) {
+    return;
+  }
+
+  try {
+    const child = await deriveSession(currentSession.value.id, deriveTopic.value.trim());
+    pushLog(`已派生新会话：${child.topic}`);
+    deriveTopic.value = "";
+    await loadSessions(child.id);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "派生会话失败";
+  }
+}
+
+function openReportPanel() {
+  rightSidebarOpen.value = true;
+  rightPanelTab.value = "report";
+  scrollRightPanelToTop("report");
+}
+
+function showDetailTab() {
+  rightPanelTab.value = "detail";
+  scrollRightPanelToTop("detail");
+}
+
+function showReportTab() {
+  rightPanelTab.value = "report";
+  scrollRightPanelToTop("report");
+}
+
+function toggleLeftSidebar() {
+  leftSidebarOpen.value = !leftSidebarOpen.value;
+}
+
+function toggleRightSidebar() {
+  rightSidebarOpen.value = !rightSidebarOpen.value;
+}
+
+function handleQueryBoardToggle(event: Event) {
+  queryBoardOpen.value = (event.currentTarget as HTMLDetailsElement).open;
+}
+
+function cancelCurrentStream() {
   if (currentController) {
     currentController.abort();
     currentController = null;
   }
-});
+}
+
+function openDeleteDialog(session: ResearchSession) {
+  deleteTargetSession.value = session;
+}
+
+function closeDeleteDialog() {
+  if (deletingSessionId.value) {
+    return;
+  }
+  deleteTargetSession.value = null;
+}
+
+async function confirmDeleteSession() {
+  if (!deleteTargetSession.value) {
+    return;
+  }
+
+  const session = deleteTargetSession.value;
+  deletingSessionId.value = session.id;
+
+  try {
+    await deleteSessionRequest(session.id);
+    const wasCurrent = currentSession.value?.id === session.id;
+    pushLog(`已删除历史会话：${session.topic}`);
+    deleteTargetSession.value = null;
+    await loadSessions(wasCurrent ? null : currentSession.value?.id ?? null);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "删除会话失败";
+  } finally {
+    deletingSessionId.value = null;
+  }
+}
+
+async function copyCitation(paper: ScholarlyPaper) {
+  try {
+    await copyText(buildCitationText(paper));
+    pushLog(`已复制引用：${paper.title}`);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "复制引用失败";
+  }
+}
+
+function scrollReportTo(sectionId: string) {
+  const container = reportScrollRef.value;
+  if (!container) {
+    return;
+  }
+  const target = container.querySelector<HTMLElement>(
+    `[data-section-id="${sectionId}"]`
+  );
+  if (target) {
+    container.scrollTo({ top: target.offsetTop - 12, behavior: "smooth" });
+  }
+}
+
+function pushLog(message: string) {
+  progressLogs.value = [...progressLogs.value.slice(-79), message];
+}
+
+function scrollRightPanelToTop(tab: RightPanelTab) {
+  void nextTick(() => {
+    const container = tab === "detail" ? detailScrollRef.value : reportScrollRef.value;
+    container?.scrollTo({ top: 0, behavior: "auto" });
+  });
+}
+
+function syncCurrentSessionCounters() {
+  if (!currentSession.value) {
+    return;
+  }
+  currentSession.value.paper_count = currentSession.value.papers?.length ?? 0;
+  currentSession.value.selected_count = confirmedCount.value;
+  currentSession.value.report_count = currentSession.value.reports?.length ?? currentSession.value.report_count;
+}
+
+function syncSessionListSummary() {
+  if (!currentSession.value) {
+    return;
+  }
+  const index = sessions.value.findIndex((session) => session.id === currentSession.value?.id);
+  if (index < 0) {
+    return;
+  }
+  sessions.value[index] = {
+    ...sessions.value[index],
+    paper_count: currentSession.value.paper_count,
+    selected_count: currentSession.value.selected_count,
+    report_count: currentSession.value.report_count,
+    status: currentSession.value.status,
+    updated_at: currentSession.value.updated_at
+  };
+}
+
+function compactAuthors(authors: string[]) {
+  if (!authors.length) {
+    return "Unknown authors";
+  }
+  if (authors.length <= 3) {
+    return authors.join(", ");
+  }
+  return `${authors.slice(0, 3).join(", ")} et al.`;
+}
+
+function resolvePaperLink(paper: ScholarlyPaper) {
+  if (paper.url) {
+    return paper.url;
+  }
+  if (paper.doi) {
+    return `https://doi.org/${paper.doi}`;
+  }
+  return paper.pdf_url;
+}
+
+function buildCitationText(paper: ScholarlyPaper) {
+  const authors = paper.authors.length ? compactAuthors(paper.authors) : "Unknown authors";
+  const year = paper.year || "n.d.";
+  const venue = paper.venue ? ` ${paper.venue}.` : "";
+  const doi = paper.doi ? ` DOI: ${paper.doi}.` : "";
+  return `${authors} (${year}). ${paper.title}.${venue}${doi}`.trim();
+}
+
+async function copyText(value: string) {
+  if (!value) {
+    throw new Error("没有可复制的内容");
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  throw new Error("当前环境不支持剪贴板写入");
+}
+
+function normalizeSession(session: ResearchSession): ResearchSession {
+  return {
+    ...session,
+    queries: Array.isArray(session.queries) ? session.queries : [],
+    source_statuses: session.source_statuses ?? {},
+    skipped_sources: session.skipped_sources ?? [],
+    degradation_notices: session.degradation_notices ?? [],
+    papers: (session.papers ?? []).map(normalizePaper),
+    reports: session.reports ?? []
+  };
+}
+
+function normalizePaper(paper: ScholarlyPaper): ScholarlyPaper {
+  return {
+    ...paper,
+    authors: Array.isArray(paper.authors) ? paper.authors : [],
+    tags: Array.isArray(paper.tags) ? paper.tags : [],
+    query_matches: Array.isArray(paper.query_matches) ? paper.query_matches : []
+  };
+}
+
+function normalizeQueryTasks(queries: Array<string | ResearchQueryTask>): ResearchQueryTask[] {
+  return queries.map((item, index) => {
+    if (typeof item === "string") {
+      return {
+        subtask_id: `legacy_${index}`,
+        concept: `检索式 ${index + 1}`,
+        intent: "旧格式检索式",
+        base_terms: [item],
+        query_types: ["core"],
+        result_count: 0,
+        status: "ok",
+        variants: [
+          {
+            query_id: `legacy_${index}_core`,
+            query_type: "core",
+            query_text: item,
+            result_count: 0,
+            status: "ok"
+          }
+        ]
+      };
+    }
+    return item;
+  });
+}
+
+function mergeQueryTask(subtask: ResearchQueryTask) {
+  if (!currentSession.value) {
+    return;
+  }
+  const queries = [...queryTasks.value];
+  const index = queries.findIndex((item) => item.subtask_id === subtask.subtask_id);
+  if (index >= 0) {
+    queries[index] = subtask;
+  } else {
+    queries.push(subtask);
+  }
+  currentSession.value.queries = queries;
+}
+
+function parseReportMarkdown(markdown: string): { title: string; sections: ReportSection[] } {
+  if (!markdown.trim()) {
+    return { title: "", sections: [] };
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const sections: ReportSection[] = [];
+  let title = "";
+  let currentSection: ReportSection | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      title = line.slice(2).trim();
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      const heading = line.slice(3).trim();
+      currentSection = {
+        id: makeSectionId(heading, sections.length),
+        title: heading,
+        items: []
+      };
+      sections.push(currentSection);
+      continue;
+    }
+    if (!currentSection) {
+      continue;
+    }
+    const orderedMatch = line.match(/^(\d+)\.\s+(.*)$/);
+    if (orderedMatch) {
+      currentSection.items.push({
+        kind: "ordered",
+        order: orderedMatch[1],
+        text: orderedMatch[2]
+      });
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      currentSection.items.push(parseReportBullet(line.slice(2)));
+      continue;
+    }
+    currentSection.items.push({
+      kind: "paragraph",
+      text: line
+    });
+  }
+
+  return { title, sections };
+}
+
+function parseReportBullet(text: string): ReportItem {
+  const toneMap: Array<{ prefix: string; tone: ReportTone }> = [
+    { prefix: "证据：", tone: "evidence" },
+    { prefix: "判断：", tone: "judgment" },
+    { prefix: "推测：", tone: "speculation" },
+    { prefix: "行动：", tone: "action" },
+    { prefix: "说明：", tone: "note" }
+  ];
+
+  for (const entry of toneMap) {
+    if (text.startsWith(entry.prefix)) {
+      return {
+        kind: "bullet",
+        tone: entry.tone,
+        text: text.slice(entry.prefix.length).trim()
+      };
+    }
+  }
+
+  return {
+    kind: "bullet",
+    text
+  };
+}
+
+function makeSectionId(title: string, index: number) {
+  const normalized = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized ? `report-${normalized}-${index}` : `report-section-${index}`;
+}
+
+function queryTypeLabel(queryType: string) {
+  const labels: Record<string, string> = {
+    core: "核心",
+    survey: "综述",
+    recent: "前沿",
+    benchmark: "评测"
+  };
+  return labels[queryType] ?? queryType;
+}
+
+function queryStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待",
+    ok: "成功",
+    partial: "部分成功",
+    failed: "失败",
+    skipped: "跳过",
+    idle: "空闲",
+    empty: "空"
+  };
+  return labels[status] ?? status;
+}
+
+function reportToneLabel(tone: ReportTone) {
+  const labels: Record<ReportTone, string> = {
+    evidence: "证据",
+    judgment: "判断",
+    speculation: "推测",
+    action: "行动",
+    note: "说明"
+  };
+  return labels[tone];
+}
+
+function formatSources(sources: string[] | undefined) {
+  return sources && sources.length ? sources.join(", ") : "无";
+}
+
+function formatSourceReasons(items: Array<{ source: string; reason: string }> | undefined) {
+  if (!items || !items.length) {
+    return "无";
+  }
+  return items.map((item) => `${item.source}(${item.reason})`).join(", ");
+}
+
+function relevanceLabel(label: string) {
+  const labels: Record<string, string> = {
+    must_read: "核心",
+    frontier: "前沿",
+    background: "背景",
+    adjacent: "旁支",
+    candidate: "候选"
+  };
+  return labels[label] ?? label;
+}
+
+function sessionStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    created: "已创建",
+    searching: "检索中",
+    screening: "筛选中",
+    ready: "可审查",
+    reported: "已生成报告",
+    error: "失败"
+  };
+  return labels[status] ?? status;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function readStoredBoolean(key: string, fallback: boolean) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  const value = window.localStorage.getItem(key);
+  if (value === null) {
+    return fallback;
+  }
+  return value === "1";
+}
+
+function persistBoolean(key: string, value: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(key, value ? "1" : "0");
+}
 </script>
 
-
 <style scoped>
-.app-shell {
-  position: relative;
-  min-height: 100vh;
-  padding: 72px 24px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: radial-gradient(circle at 20% 20%, #f8fafc, #dbeafe 60%);
-  color: #1f2937;
-  overflow: hidden;
-  box-sizing: border-box;
-  transition: padding 0.4s ease;
-}
-
-.app-shell.expanded {
-  padding: 0;
-  align-items: stretch;
-}
-
-.aurora {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.55;
-}
-
-.aurora span {
-  position: absolute;
-  width: 45vw;
-  height: 45vw;
-  max-width: 520px;
-  max-height: 520px;
-  background: radial-gradient(circle, rgba(148, 197, 255, 0.35), transparent 60%);
-  filter: blur(90px);
-  animation: float 26s infinite linear;
-}
-
-.aurora span:nth-child(1) {
-  top: -20%;
-  left: -18%;
-  animation-delay: 0s;
-}
-
-.aurora span:nth-child(2) {
-  bottom: -25%;
-  right: -20%;
-  background: radial-gradient(circle, rgba(166, 139, 255, 0.28), transparent 60%);
-  animation-delay: -9s;
-}
-
-.aurora span:nth-child(3) {
-  top: 35%;
-  left: 45%;
-  background: radial-gradient(circle, rgba(164, 219, 216, 0.26), transparent 60%);
-  animation-delay: -16s;
-}
-
-.layout {
-  position: relative;
-  width: 100%;
-  display: flex;
-  gap: 24px;
-  z-index: 1;
-  transition: all 0.4s ease;
-}
-
-.layout-centered {
-  max-width: 600px;
-  justify-content: center;
-  align-items: center;
-}
-
-.layout-fullscreen {
+.workspace {
+  --bg: #e8dfcf;
+  --surface: rgba(243, 236, 225, 0.96);
+  --surface-strong: rgba(250, 246, 238, 0.98);
+  --line: #b2a388;
+  --line-soft: rgba(90, 74, 52, 0.18);
+  --text: #201a14;
+  --muted: #6f6557;
+  --accent: #4f4030;
+  --accent-strong: #20160f;
+  --success: #35573b;
+  --warning: #916a28;
+  --danger: #923939;
+  --left-width: 288px;
+  --right-width: 430px;
   height: 100vh;
-  max-width: 100%;
-  gap: 0;
-  align-items: stretch;
+  min-height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: var(--left-width) minmax(0, 1fr) var(--right-width);
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0)),
+    repeating-linear-gradient(
+      0deg,
+      rgba(90, 74, 52, 0.05) 0,
+      rgba(90, 74, 52, 0.05) 1px,
+      transparent 1px,
+      transparent 34px
+    ),
+    var(--bg);
 }
 
-.panel {
-  position: relative;
-  flex: 1 1 360px;
-  padding: 24px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(8px);
+.workspace.left-collapsed {
+  --left-width: 74px;
+}
+
+.workspace.right-collapsed {
+  --right-width: 74px;
+}
+
+.left-rail,
+.right-rail,
+.center-stage {
+  height: 100vh;
+  min-height: 0;
+}
+
+.left-rail,
+.right-rail {
+  display: flex;
+  flex-direction: column;
+  background: rgba(238, 230, 217, 0.94);
+  border-right: 1px solid var(--line-soft);
   overflow: hidden;
 }
 
-.panel-form {
-  max-width: 420px;
+.right-rail {
+  border-right: none;
+  border-left: 1px solid var(--line-soft);
 }
 
-.panel-centered {
-  width: 100%;
-  max-width: 600px;
-  padding: 40px;
-  box-shadow: 0 32px 64px rgba(15, 23, 42, 0.15);
-  transform: scale(1);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.panel-centered:hover {
-  transform: scale(1.02);
-  box-shadow: 0 40px 80px rgba(15, 23, 42, 0.2);
-}
-
-.panel-result {
-  min-width: 360px;
-  flex: 2 1 420px;
-}
-
-.panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(125, 86, 255, 0.1));
-  opacity: 0;
-  transition: opacity 0.35s ease;
-  z-index: 0;
-}
-
-.panel:hover::before {
-  opacity: 1;
-}
-
-.panel > * {
-  position: relative;
-  z-index: 1;
-}
-
-.panel-form h1 {
-  margin: 0;
-  font-size: 26px;
-  letter-spacing: 0.01em;
-}
-
-.panel-form p {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.panel-head {
+.center-stage {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px 24px;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(252, 248, 241, 0.36);
 }
 
-.logo {
-  width: 52px;
-  height: 52px;
+.rail-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 18px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.right-top {
+  align-items: center;
+}
+
+.rail-body,
+.right-body {
+  min-height: 0;
+  flex: 1;
+  padding: 18px;
+}
+
+.rail-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.right-body {
+  overflow: hidden;
+}
+
+.brand-lockup {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.brand-lockup.compact {
+  width: 100%;
+  justify-content: center;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.4);
+  border: 1px solid var(--line);
+  background: var(--accent-strong);
+  color: #f8f1e5;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
-.logo svg {
-  width: 28px;
-  height: 28px;
-  fill: #f8fafc;
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
-.form {
+h1,
+h2,
+h3,
+h4,
+p,
+ol,
+ul,
+dl,
+dt,
+dd,
+pre {
+  margin: 0;
+}
+
+.brand-lockup h1,
+.stage-heading h2,
+.detail-hero h2,
+.report-hero h2 {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.brand-lockup h1 {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.brand-copy {
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 22ch;
+}
+
+.form-head {
   display: flex;
   flex-direction: column;
+  gap: 4px;
+}
+
+.form-head h2 {
+  font-size: 17px;
+  line-height: 1.15;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.brand-copy,
+.muted,
+.paper-authors,
+.paper-summary,
+.session-meta,
+.stage-subtitle,
+.reading-copy,
+.dialog-copy {
+  color: var(--muted);
+}
+
+.rail-toggle,
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.danger-btn,
+.text-btn,
+.primary-link,
+.secondary-link,
+.panel-switch button {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+}
+
+.rail-toggle,
+.text-btn {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.primary-btn,
+.primary-link {
+  padding: 11px 14px;
+  background: var(--accent-strong);
+  color: #f8f1e5;
+  border-color: var(--accent-strong);
+}
+
+.secondary-btn,
+.secondary-link {
+  padding: 11px 14px;
+  background: rgba(255, 251, 243, 0.9);
+}
+
+.primary-link,
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ghost-btn,
+.danger-btn {
+  padding: 11px 14px;
+}
+
+.danger-btn {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff7f7;
+}
+
+.panel-switch {
+  display: inline-flex;
+  align-items: center;
   gap: 18px;
+  width: 100%;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.field {
+.panel-switch button {
+  padding: 0 0 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.panel-switch button.active {
+  background: transparent;
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+.rail-toggle {
+  width: 36px;
+  min-width: 36px;
+  height: 76px;
+  padding: 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 4px;
+  background: rgba(255, 250, 242, 0.76);
+}
+
+.handle-dots {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 4px;
 }
 
-.field span {
+.handle-dots span {
+  width: 12px;
+  height: 1px;
+  background: var(--accent);
+}
+
+.handle-arrow {
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+}
+
+.left-handle .handle-arrow {
+  transform: rotate(135deg);
+}
+
+.left-handle .handle-arrow.collapsed {
+  transform: rotate(-45deg);
+}
+
+.right-handle .handle-arrow {
+  transform: rotate(-45deg);
+}
+
+.right-handle .handle-arrow.collapsed {
+  transform: rotate(135deg);
+}
+
+.topic-form,
+.side-block,
+.query-board,
+.filter-bar,
+.paper-stage,
+.detail-block,
+.report-section {
+  border: 1px solid var(--line-soft);
+  background: var(--surface-strong);
+}
+
+.topic-form,
+.side-block,
+.paper-stage {
+  padding: 12px;
+}
+
+.side-block + .side-block {
+  margin-top: 12px;
+}
+
+.side-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.left-rail .topic-form,
+.left-rail .side-block {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.left-rail .topic-form {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.left-rail .side-block + .side-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.left-rail .section-title {
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.left-rail .section-title h2 {
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 600;
-  color: #475569;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.left-rail .topic-form .primary-btn {
+  width: 100%;
+}
+
+.left-rail .topic-form .form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.left-rail .text-btn {
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.left-rail .text-btn:hover {
+  color: var(--text);
+}
+
+.left-rail textarea {
+  min-height: 112px;
+}
+
+.left-rail label > span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.topic-form label,
+.filter-bar label,
+.derive-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 textarea,
 input,
 select {
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.92);
-  color: #1f2937;
-  font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 251, 243, 0.92);
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
 }
 
 textarea:focus,
 input:focus,
-select:focus {
-  outline: none;
-  border-color: rgba(37, 99, 235, 0.65);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-  background: #ffffff;
+select:focus,
+button:focus,
+a:focus {
+  outline: 2px solid rgba(79, 64, 48, 0.28);
+  outline-offset: 2px;
 }
 
-.options {
+.form-actions,
+.stage-actions,
+.detail-actions,
+.dialog-actions {
   display: flex;
-  gap: 16px;
   flex-wrap: wrap;
-}
-
-.option {
-  flex: 1;
-  min-width: 140px;
-}
-
-.form-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.submit {
-  align-self: flex-start;
-  padding: 12px 24px;
-  border-radius: 16px;
-  border: none;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  position: relative;
-}
-
-.submit-label {
-  display: inline-flex;
-  align-items: center;
   gap: 10px;
 }
 
-.submit .spinner {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.85);
-  stroke-linecap: round;
-  animation: spin 1s linear infinite;
+.stage-actions .primary-btn,
+.stage-actions .secondary-btn {
+  padding: 9px 12px;
 }
 
-.submit:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+.detail-actions .primary-link,
+.detail-actions .secondary-link,
+.cite-actions .secondary-link {
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
-.submit:not(:disabled):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28);
-}
-
-.secondary-btn {
-  padding: 10px 18px;
-  border-radius: 14px;
-  background: rgba(148, 163, 184, 0.12);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  color: #1f2937;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-
-.secondary-btn:hover {
-  background: rgba(148, 163, 184, 0.2);
-  border-color: rgba(148, 163, 184, 0.35);
-  color: #0f172a;
-}
-
-.error-chip {
-  margin-top: 16px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.35);
-  border-radius: 14px;
-  color: #b91c1c;
-  font-size: 14px;
-}
-
-.error-chip svg {
-  width: 18px;
-  height: 18px;
-  fill: currentColor;
-}
-
-.panel-result {
+.topic-form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
-.status-bar {
+.section-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.section-title h2,
+.section-title h3 {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.session-list,
+.paper-list,
+.match-list,
+.variant-list,
+.report-items,
+.progress-list {
+  list-style: none;
+  padding: 0;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px;
+  align-items: stretch;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+}
+
+.session-item.active {
+  border-color: var(--accent);
+  background: rgba(255, 245, 229, 0.68);
+}
+
+.session-select {
+  padding: 8px 9px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-delete {
+  width: 28px;
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  padding: 6px 4px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.22;
+}
+
+.session-item:hover .session-delete,
+.session-delete:hover {
+  opacity: 1;
+}
+
+.session-topline {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.status-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.status-controls {
-  display: flex;
   gap: 8px;
+  margin-bottom: 2px;
 }
 
-.status-chip {
+.session-topline h3 {
+  font-size: 12px;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.session-meta {
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.session-status {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(191, 219, 254, 0.28);
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  color: #1f2937;
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  transition: background 0.3s ease, color 0.3s ease;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.status-chip.active {
-  background: rgba(129, 140, 248, 0.2);
-  border-color: rgba(129, 140, 248, 0.4);
-  color: #1e293b;
-}
-
-.status-chip .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #2563eb;
-  box-shadow: 0 0 12px rgba(37, 99, 235, 0.45);
-  animation: pulse 1.8s ease-in-out infinite;
-}
-
-.status-meta {
-  color: #64748b;
-  font-size: 13px;
-}
-
-.timeline-wrapper {
-  margin-top: 12px;
-  max-height: 220px;
-  overflow-y: auto;
-  padding-right: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(129, 140, 248, 0.45) rgba(226, 232, 240, 0.6);
-}
-
-.timeline-wrapper::-webkit-scrollbar {
+.status-dot {
   width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
 }
 
-.timeline-wrapper::-webkit-scrollbar-track {
-  background: rgba(226, 232, 240, 0.6);
-  border-radius: 999px;
+.session-status.searching .status-dot,
+.session-status.screening .status-dot {
+  background: var(--warning);
 }
 
-.timeline-wrapper::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(129, 140, 248, 0.8), rgba(59, 130, 246, 0.7));
-  border-radius: 999px;
+.session-status.ready .status-dot,
+.session-status.reported .status-dot {
+  background: var(--success);
 }
 
-.timeline-wrapper::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(99, 102, 241, 0.9), rgba(37, 99, 235, 0.8));
+.session-status.error .status-dot {
+  background: var(--danger);
 }
 
-.timeline {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.session-status.created .status-dot {
+  background: var(--accent);
+}
+
+.status-pill,
+.query-status,
+.memo-badge,
+.tone-chip,
+.label-chip,
+.stat-chip {
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 251, 243, 0.92);
+}
+
+.status-pill,
+.query-status,
+.memo-badge,
+.tone-chip,
+.label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.progress-list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  position: relative;
-  padding-left: 12px;
-}
-
-.timeline::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 0;
-  width: 2px;
-  background: linear-gradient(180deg, rgba(59, 130, 246, 0.35), rgba(129, 140, 248, 0.15));
-}
-
-.timeline li {
-  position: relative;
-  padding-left: 24px;
-  color: #1e293b;
-  font-size: 14px;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
   line-height: 1.5;
 }
 
-.timeline-node {
+.progress-list li {
+  padding-left: 14px;
+  position: relative;
+}
+
+.progress-list li::before {
+  content: "";
   position: absolute;
-  left: -12px;
-  top: 6px;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #38bdf8, #7c3aed);
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.22);
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
 }
 
-.timeline-enter-active,
-.timeline-leave-active {
-  transition: all 0.35s ease, opacity 0.35s ease;
-}
-
-.timeline-enter-from,
-.timeline-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-.tasks-section {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 20px;
-  align-items: start;
-}
-
-@media (max-width: 960px) {
-  .tasks-section {
-    grid-template-columns: 1fr;
-  }
-}
-
-.tasks-list {
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  border-radius: 18px;
-  padding: 18px;
+.process-strip {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.4);
-}
-
-.tasks-list h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.tasks-list ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.task-item {
-  border-radius: 14px;
-  border: 1px solid transparent;
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.task-item.completed {
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(191, 219, 254, 0.28);
-}
-
-.task-item.active {
-  border-color: rgba(129, 140, 248, 0.5);
-  background: rgba(224, 231, 255, 0.5);
-}
-
-.task-button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px 6px;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.task-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: #1e293b;
-}
-
-.task-status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #1f2937;
-  background: rgba(148, 163, 184, 0.2);
-}
-
-.task-status.pending {
-  background: rgba(148, 163, 184, 0.18);
-  color: #475569;
-}
-
-.task-status.in_progress {
-  background: rgba(129, 140, 248, 0.24);
-  color: #312e81;
-}
-
-.task-status.completed {
-  background: rgba(34, 197, 94, 0.2);
-  color: #15803d;
-}
-
-.task-status.skipped {
-  background: rgba(248, 113, 113, 0.18);
-  color: #b91c1c;
-}
-
-.task-intent {
-  margin: 0;
-  padding: 0 14px 12px 14px;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.task-detail {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  border-radius: 18px;
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.5);
-}
-
-.task-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.task-chip-group {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
-.task-header h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.task-header .muted {
-  margin: 6px 0 0;
-}
-
-.task-label {
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(191, 219, 254, 0.32);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  font-size: 12px;
-  color: #1e3a8a;
-}
-
-.task-label.note-chip {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: rgba(34, 197, 94, 0.35);
-  color: #15803d;
-}
-
-.task-label.path-chip {
-  display: inline-flex;
+.process-summary {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: 360px;
-  background: rgba(56, 189, 248, 0.2);
-  border-color: rgba(56, 189, 248, 0.35);
-  color: #0369a1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 2px 0;
 }
 
-.path-label {
-  font-weight: 500;
-}
-
-.path-text {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chip-action {
-  border: none;
-  background: rgba(56, 189, 248, 0.2);
-  color: #0369a1;
-  padding: 3px 8px;
-  border-radius: 10px;
+.process-label {
+  color: var(--muted);
   font-size: 11px;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.chip-action:hover {
-  background: rgba(14, 165, 233, 0.28);
-  color: #0f172a;
+.process-text {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.task-notices {
-  background: rgba(191, 219, 254, 0.28);
-  border: 1px solid rgba(96, 165, 250, 0.35);
-  border-radius: 16px;
-  padding: 14px 18px;
-  color: #1f2937;
-}
-
-.task-notices h4 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.task-notices ul {
-  list-style: disc;
-  margin: 0 0 0 18px;
-  padding: 0;
+.stage-header {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.task-notices li {
-  font-size: 13px;
-}
-
-.report-block {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  border-radius: 18px;
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+  flex-shrink: 0;
 }
 
-.report-block h3 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.block-pre {
-  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
-    Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #1f2937;
-  background: rgba(248, 250, 252, 0.9);
-  padding: 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  overflow: auto;
-  max-height: 420px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(129, 140, 248, 0.6) rgba(226, 232, 240, 0.7);
-}
-
-.block-pre::-webkit-scrollbar {
-  width: 6px;
-}
-
-.block-pre::-webkit-scrollbar-track {
-  background: rgba(226, 232, 240, 0.7);
-  border-radius: 999px;
-}
-
-.block-pre::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(99, 102, 241, 0.75), rgba(59, 130, 246, 0.65));
-  border-radius: 999px;
-}
-
-.block-pre::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(79, 70, 229, 0.8), rgba(37, 99, 235, 0.75));
-}
-
-.summary-block .block-pre,
-.sources-block .block-pre {
-  max-height: 360px;
-}
-
-
-.tools-block {
-  position: relative;
-  margin-top: 16px;
-  padding: 20px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.4);
+.stage-heading {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
 }
 
-.tools-block h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-  letter-spacing: 0.02em;
-}
-
-.tool-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.stage-heading-top {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tool-entry {
-  background: rgba(248, 250, 252, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 14px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.tool-entry-header {
-  display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  align-items: center;
-  justify-content: space-between;
 }
 
-.tool-entry-title {
-  font-weight: 600;
-  color: #1f2937;
+.stage-heading h2 {
+  font-size: 22px;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.tool-entry-note {
-  font-size: 12px;
-  color: #0f766e;
+.detail-hero h2,
+.report-hero h2 {
+  font-size: 22px;
+  line-height: 1.2;
 }
 
-.tool-entry-path {
-  margin: 0;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #2563eb;
-}
-
-.tool-subtitle {
-  margin: 0;
-  font-size: 13px;
-  color: #475569;
-  font-weight: 500;
-}
-
-.tool-pre {
-  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
-    Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: #1f2937;
-  background: rgba(248, 250, 252, 0.9);
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  overflow: auto;
-  max-height: 260px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(129, 140, 248, 0.6) rgba(226, 232, 240, 0.7);
-}
-
-.tool-pre::-webkit-scrollbar {
-  width: 6px;
-}
-
-.tool-pre::-webkit-scrollbar-track {
-  background: rgba(226, 232, 240, 0.7);
-}
-
-.tool-pre::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.7);
-  border-radius: 10px;
-}
-
-.link-btn {
-  background: none;
-  border: none;
-  color: #0369a1;
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: 12px;
-  border-radius: 8px;
-  transition: color 0.2s ease, background 0.2s ease;
-}
-
-.link-btn:hover {
-  color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.16);
-}
-
-
-.sources-block,
-.summary-block {
-  position: relative;
-  margin-top: 16px;
-  padding: 18px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.4);
-}
-
-.sources-history {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.sources-history h4 {
-  margin: 0;
-  color: #1f2937;
-  font-size: 14px;
-  letter-spacing: 0.01em;
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.history-list details {
-  background: rgba(248, 250, 252, 0.95);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 14px;
-  padding: 12px 16px;
-  color: #1f2937;
-  transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.history-list details[open] {
-  background: rgba(224, 231, 255, 0.55);
-  border-color: rgba(129, 140, 248, 0.4);
-}
-
-.history-list summary {
-  cursor: pointer;
-  font-weight: 600;
-  outline: none;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.history-list summary::-webkit-details-marker {
-  display: none;
-}
-
-.history-list summary::after {
-  content: "▾";
-  margin-left: 6px;
-  font-size: 12px;
-  opacity: 0.7;
-  transition: transform 0.2s ease;
-}
-
-.history-list details[open] summary::after {
-  transform: rotate(180deg);
-}
-
-.block-highlight {
-  animation: glow 1.2s ease;
-}
-
-.sources-block h3,
-.summary-block h3 {
-  margin: 0 0 14px;
-  color: #1f2937;
-  letter-spacing: 0.02em;
-}
-
-.sources-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.source-item {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.source-link {
-  color: #2563eb;
-  text-decoration: none;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  transition: color 0.2s ease;
-}
-
-.source-link::after {
-  content: " ↗";
-  font-size: 12px;
-  opacity: 0.6;
-}
-
-.source-link:hover {
-  color: #0f172a;
-}
-
-.source-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 12px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.98);
-  color: #1f2937;
-  padding: 14px 16px;
-  border-radius: 16px;
-  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.18);
-  width: min(420px, 90vw);
-  z-index: 20;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-}
-
-.source-tooltip::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 10px;
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.98) transparent transparent transparent;
-}
-
-.source-tooltip::before {
-  content: "";
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 12px 10px 0 10px;
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.98) transparent transparent transparent;
-  filter: drop-shadow(0 -2px 4px rgba(15, 23, 42, 0.12));
-}
-
-.source-tooltip p {
-  margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.source-tooltip p:last-child {
-  margin-bottom: 0;
-}
-
-.muted-text {
-  color: #64748b;
-}
-
-.source-item:hover .source-tooltip,
-.source-item:focus-within .source-tooltip {
+.stage-meta-stack {
   display: block;
 }
 
-.hint.muted {
-  color: #64748b;
+.stage-meta-line,
+.stage-subtitle {
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-@keyframes float {
-  0% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
+.stage-meta-line {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-subtitle {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-pill.subtle {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.banner {
+  border: 1px solid var(--line-soft);
+  padding: 10px 12px;
+  background: var(--surface-strong);
+  flex-shrink: 0;
+}
+
+.error-banner {
+  color: var(--danger);
+  border-color: rgba(146, 57, 57, 0.28);
+}
+
+.warning-banner {
+  color: var(--warning);
+  border-color: rgba(145, 106, 40, 0.28);
+}
+
+.warning-banner ul {
+  margin-top: 8px;
+  padding-left: 18px;
+}
+
+.process-detail {
+  border: 1px solid var(--line-soft);
+  background: rgba(250, 246, 238, 0.82);
+}
+
+.compact-banner {
+  padding: 0;
+}
+
+.compact-banner summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.compact-banner summary::-webkit-details-marker {
+  display: none;
+}
+
+.process-detail summary::after {
+  content: "";
+  margin-left: auto;
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.process-detail[open] summary::after {
+  transform: rotate(225deg);
+}
+
+.process-detail-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.process-detail-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.compact-banner ul {
+  margin: 0;
+  padding: 0 18px 12px 32px;
+}
+
+.query-board {
+  padding: 0;
+}
+
+.query-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.query-card {
+  border-top: 1px solid var(--line-soft);
+  border-right: none;
+  border-bottom: none;
+  border-left: none;
+  padding: 12px;
+  background: rgba(255, 250, 242, 0.38);
+}
+
+.query-card-head,
+.variant-head,
+.paper-title-row,
+.detail-hero,
+.report-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.query-card-head h3,
+.paper-title-row h3 {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.term-list,
+.paper-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.term-list span,
+.paper-tags span {
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
+  font-size: 12px;
+  background: rgba(255, 248, 236, 0.96);
+}
+
+.variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.variant-list li {
+  border-top: 1px dashed var(--line-soft);
+  padding-top: 10px;
+}
+
+code {
+  display: block;
+  margin: 8px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(247, 242, 233, 0.96);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.6fr) repeat(3, minmax(0, 0.72fr));
+  gap: 8px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+}
+
+.filter-bar label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 249, 240, 0.94);
+  font-weight: 500;
+}
+
+.filter-bar label span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.filter-bar input,
+.filter-bar select {
+  border: none;
+  background: transparent;
+  padding: 10px 0;
+}
+
+.paper-stage {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.paper-stage .section-title {
+  padding: 0 2px 8px;
+  margin-bottom: 0;
+}
+
+.paper-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-top: 1px solid var(--line-soft);
+}
+
+.paper-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 92px;
+  gap: 12px;
+  padding: 14px 8px 14px 10px;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+}
+
+.paper-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: transparent;
+}
+
+.paper-row:hover {
+  background: rgba(255, 248, 236, 0.54);
+}
+
+.paper-row.active {
+  background: rgba(255, 244, 224, 0.78);
+}
+
+.paper-row.active::before {
+  background: var(--accent);
+}
+
+.paper-row.excluded {
+  opacity: 0.58;
+}
+
+.paper-rank {
+  font-size: 28px;
+  line-height: 1;
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--accent);
+}
+
+.paper-main {
+  min-width: 0;
+}
+
+.paper-title-row {
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.paper-title-row h3 {
+  overflow-wrap: anywhere;
+}
+
+.paper-year {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.paper-summary {
+  line-height: 1.65;
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.paper-side {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0.16;
+  transform: translateY(2px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.paper-row:hover .paper-side,
+.paper-row.active .paper-side,
+.paper-row:focus-within .paper-side {
+  opacity: 1;
+  transform: none;
+}
+
+.toggle-select {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.toggle-select input {
+  width: 18px;
+  height: 18px;
+}
+
+.label-chip.must_read {
+  color: var(--success);
+}
+
+.label-chip.frontier {
+  color: var(--warning);
+}
+
+.label-chip.adjacent {
+  color: #6c4a87;
+}
+
+.right-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.detail-hero,
+.report-hero {
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.detail-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.detail-heading-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.detail-authors,
+.detail-meta-line {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.detail-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.detail-meta-line span::after {
+  content: "·";
+  margin-left: 10px;
+  color: var(--line);
+}
+
+.detail-meta-line span:last-child::after {
+  display: none;
+}
+
+.score-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.92);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-actions,
+.status-actions {
+  margin-bottom: 12px;
+}
+
+.detail-actions {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-actions button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 251, 243, 0.92);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.status-actions button.active {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #f8f1e5;
+}
+
+.status-actions button.danger {
+  color: var(--danger);
+}
+
+.cite-box {
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.92);
+  padding: 10px 12px;
+}
+
+.detail-block {
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.reading-copy {
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-section-title {
+  align-items: center;
+}
+
+.ai-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line-soft);
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.7;
+}
+
+.ai-note-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cite-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cite-text {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.cite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.match-list li {
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.92);
+  padding: 10px;
+}
+
+.match-list li span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.derive-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.memo-badge {
+  color: var(--accent);
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.report-summary {
+  margin-top: 4px;
+}
+
+.report-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.report-toc button {
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.92);
+  cursor: pointer;
+}
+
+.report-article {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.report-section {
+  padding: 14px 0;
+  border: none;
+  border-top: 1px solid var(--line-soft);
+  background: transparent;
+}
+
+.report-section h3 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.report-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.report-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.75;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-soft);
+}
+
+.report-item p {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.report-item.paragraph {
+  display: block;
+}
+
+.report-order {
+  min-width: 28px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.tone-chip {
+  min-width: 36px;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 11px;
+}
+
+.report-item.evidence .tone-chip {
+  color: var(--success);
+}
+
+.report-item.evidence {
+  border-left-color: rgba(53, 87, 59, 0.5);
+}
+
+.report-item.judgment .tone-chip {
+  color: var(--accent);
+}
+
+.report-item.judgment {
+  border-left-color: rgba(79, 64, 48, 0.45);
+}
+
+.report-item.speculation .tone-chip {
+  color: #6c4a87;
+}
+
+.report-item.speculation {
+  border-left-color: rgba(108, 74, 135, 0.45);
+}
+
+.report-item.action .tone-chip {
+  color: var(--warning);
+}
+
+.report-item.action {
+  border-left-color: rgba(145, 106, 40, 0.48);
+}
+
+.report-item.note {
+  border-left-color: rgba(90, 74, 52, 0.26);
+}
+
+.report-draft {
+  white-space: pre-wrap;
+  line-height: 1.75;
+  font-family: "Cascadia Code", Consolas, monospace;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 250, 242, 0.92);
+  padding: 14px;
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  background: rgba(255, 250, 242, 0.7);
+  padding: 22px;
+  text-align: center;
+  line-height: 1.8;
+}
+
+.empty-state.inset {
+  margin-top: 10px;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 18, 14, 0.44);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 30;
+}
+
+.dialog-panel {
+  width: min(520px, 100%);
+  border: 1px solid var(--line);
+  background: rgba(247, 240, 228, 0.98);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dialog-panel h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 26px;
+}
+
+.dialog-copy strong {
+  color: var(--text);
+}
+
+@media (max-width: 1360px) {
+  .workspace {
+    --left-width: 270px;
+    --right-width: 380px;
   }
-  50% {
-    transform: translate3d(10%, 6%, 0) rotate(3deg);
-  }
-  100% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
+
+  .filter-bar {
+    grid-template-columns: minmax(200px, 1.2fr) repeat(3, minmax(120px, 0.6fr));
   }
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+@media (max-width: 1180px) {
+  .workspace {
+    grid-template-columns: var(--left-width) minmax(0, 1fr);
   }
-}
 
-@keyframes pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
+  .right-rail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 100vw);
+    z-index: 20;
+    box-shadow: -10px 0 30px rgba(25, 19, 14, 0.14);
   }
-  50% {
-    transform: scale(1.3);
-    opacity: 0.5;
-  }
-}
 
-@keyframes glow {
-  0% {
-    box-shadow: 0 0 0 rgba(59, 130, 246, 0.3);
-    border-color: rgba(59, 130, 246, 0.5);
+  .workspace.right-collapsed .right-rail {
+    transform: translateX(calc(100% - 74px));
   }
-  100% {
-    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12);
-    border-color: rgba(148, 163, 184, 0.2);
+
+  .workspace:not(.right-collapsed) .right-rail {
+    transform: translateX(0);
   }
 }
 
 @media (max-width: 960px) {
-  .app-shell {
-    padding: 56px 16px;
-  }
-
-  .layout {
+  .workspace {
+    display: flex;
     flex-direction: column;
-    align-items: stretch;
-  }
-
-  .panel {
-    padding: 22px;
-  }
-
-  .panel-form,
-  .panel-result {
-    max-width: none;
-  }
-
-  .status-bar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .status-main,
-  .status-controls {
-    width: 100%;
-  }
-
-  .status-controls {
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 600px) {
-  .options {
-    flex-direction: column;
-  }
-
-  .status-meta {
-    font-size: 12px;
-  }
-
-  .panel-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .panel-form h1 {
-    font-size: 24px;
-  }
-}
-
-/* 侧边栏样式 */
-.sidebar {
-  width: 400px;
-  min-width: 400px;
-  height: 100vh;
-  background: rgba(255, 255, 255, 0.98);
-  border-right: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 32px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  overflow-y: auto;
-  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.08);
-}
-
-.sidebar-header {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.sidebar-header h2 {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-  color: #1f2937;
-}
-
-.back-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: transparent;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 12px;
-  color: #64748b;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  width: fit-content;
-}
-
-.back-btn:hover:not(:disabled) {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: #3b82f6;
-  color: #3b82f6;
-}
-
-.back-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.research-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.info-item label {
-  font-size: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: #64748b;
-}
-
-.info-item p {
-  margin: 0;
-  font-size: 14px;
-  color: #1f2937;
-  line-height: 1.6;
-}
-
-.topic-display {
-  font-size: 16px !important;
-  font-weight: 600;
-  color: #0f172a !important;
-  padding: 12px;
-  background: rgba(59, 130, 246, 0.05);
-  border-radius: 8px;
-  border-left: 3px solid #3b82f6;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 8px;
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-  border-radius: 4px;
-  transition: width 0.5s ease;
-}
-
-.progress-text {
-  font-size: 13px !important;
-  color: #64748b !important;
-  font-weight: 500;
-}
-
-.sidebar-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
-}
-
-.new-research-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 14px 20px;
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  border: none;
-  border-radius: 12px;
-  color: white;
-  font-size: 15px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
-
-.new-research-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
-}
-
-.new-research-btn:active {
-  transform: translateY(0);
-}
-
-/* 全屏状态下的结果面板 */
-.layout-fullscreen .panel-result {
-  flex: 1;
-  height: 100vh;
-  border-radius: 0;
-  border: none;
-  overflow-y: auto;
-  max-width: none;
-}
-
-@media (max-width: 1024px) {
-  .sidebar {
-    width: 320px;
-    min-width: 320px;
-  }
-}
-
-@media (max-width: 768px) {
-  .layout-fullscreen {
-    flex-direction: column;
-  }
-
-  .sidebar {
-    width: 100%;
-    min-width: 100%;
     height: auto;
-    max-height: 40vh;
+    min-height: auto;
+    overflow: visible;
   }
 
-  .layout-fullscreen .panel-result {
-    height: 60vh;
+  .left-rail,
+  .center-stage {
+    min-height: auto;
+    height: auto;
+  }
+
+  .left-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .center-stage {
+    overflow: visible;
+  }
+
+  .right-rail {
+    height: 100vh;
+  }
+
+  .stage-header,
+  .detail-hero,
+  .report-hero {
+    flex-direction: column;
+  }
+
+  .filter-bar,
+  .query-grid,
+  .derive-form {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-meta-line {
+    gap: 4px 8px;
+  }
+
+  .paper-row {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-side {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

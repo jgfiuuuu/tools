@@ -8,12 +8,13 @@ from typing import Any, Dict, Iterator, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from config import Configuration, SearchAPI
 from agent import DeepResearchAgent
+from services.scholarly_workflow import ScholarlyResearchService
 
 # 添加控制台日志处理程序
 logger.add(
@@ -55,6 +56,33 @@ class ResearchResponse(BaseModel):
     )
 
 
+class CreateResearchSessionRequest(BaseModel):
+    """Create a scholarly research session."""
+
+    topic: str = Field(..., min_length=1, description="Research question or topic")
+    parent_session_id: str | None = Field(
+        default=None,
+        description="Optional parent session when deriving a new research thread",
+    )
+
+
+class UpdateSessionPaperRequest(BaseModel):
+    """Update user-side paper selection metadata."""
+
+    user_status: str | None = Field(
+        default=None,
+        description="candidate, included, saved, to_read, or excluded",
+    )
+    selected: bool | None = Field(default=None)
+    tags: list[str] | None = Field(default=None)
+
+
+class DeriveResearchSessionRequest(BaseModel):
+    """Create a child session from an existing session."""
+
+    topic: str = Field(..., min_length=1)
+
+
 def _mask_secret(value: Optional[str], visible: int = 4) -> str:
     """Mask sensitive tokens while keeping leading and trailing characters."""
     if not value:
@@ -75,8 +103,16 @@ def _build_config(payload: ResearchRequest) -> Configuration:
     return Configuration.from_env(overrides=overrides)
 
 
+def _scholarly_service() -> ScholarlyResearchService:
+    return ScholarlyResearchService(Configuration.from_env())
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="HelloAgents Deep Researcher")
+    app = FastAPI(title="文献妙妙屋 API")
 
     app.add_middleware(
         CORSMiddleware,
@@ -171,6 +207,132 @@ def create_app() -> FastAPI:
                 "Connection": "keep-alive",
             },
         )
+
+    @app.get("/research/sessions")
+    def list_research_sessions() -> list[dict[str, Any]]:
+        return _scholarly_service().list_sessions()
+
+    @app.post("/research/sessions")
+    def create_research_session(payload: CreateResearchSessionRequest) -> dict[str, Any]:
+        try:
+            return _scholarly_service().create_session(
+                payload.topic.strip(),
+                parent_session_id=payload.parent_session_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Parent session not found") from exc
+        except Exception as exc:
+            logger.exception("Scholarly session creation failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @app.post("/research/sessions/stream")
+    def create_research_session_stream(payload: CreateResearchSessionRequest) -> StreamingResponse:
+        service = _scholarly_service()
+
+        def event_iterator() -> Iterator[str]:
+            for event in service.create_session_stream(
+                payload.topic.strip(),
+                parent_session_id=payload.parent_session_id,
+            ):
+                yield _sse(event)
+            yield _sse({"type": "done"})
+
+        return StreamingResponse(
+            event_iterator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+
+    @app.get("/research/sessions/{session_id}")
+    def get_research_session(session_id: str) -> dict[str, Any]:
+        try:
+            return _scholarly_service().get_session_detail(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.delete("/research/sessions/{session_id}")
+    def delete_research_session(session_id: str) -> dict[str, Any]:
+        try:
+            _scholarly_service().delete_session(session_id)
+            return {"deleted": True, "session_id": session_id}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.post("/research/sessions/{session_id}/screen")
+    def screen_research_session(session_id: str) -> dict[str, Any]:
+        try:
+            return _scholarly_service().rescreen_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.patch("/research/sessions/{session_id}/papers/{paper_id}")
+    def update_research_session_paper(
+        session_id: str,
+        paper_id: str,
+        payload: UpdateSessionPaperRequest,
+    ) -> dict[str, Any]:
+        try:
+            return _scholarly_service().update_paper(
+                session_id,
+                paper_id,
+                user_status=payload.user_status,
+                selected=payload.selected,
+                tags=payload.tags,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Paper not found") from exc
+
+    @app.post("/research/sessions/{session_id}/report")
+    def generate_research_report(session_id: str) -> dict[str, Any]:
+        try:
+            return _scholarly_service().generate_report(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.post("/research/sessions/{session_id}/report/stream")
+    def generate_research_report_stream(session_id: str) -> StreamingResponse:
+        service = _scholarly_service()
+
+        def event_iterator() -> Iterator[str]:
+            try:
+                for event in service.generate_report_stream(session_id):
+                    yield _sse(event)
+                yield _sse({"type": "done"})
+            except KeyError:
+                yield _sse({"type": "error", "detail": "Session not found"})
+            except Exception as exc:
+                logger.exception("Report generation failed")
+                yield _sse({"type": "error", "detail": str(exc)})
+
+        return StreamingResponse(
+            event_iterator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+
+    @app.post("/research/sessions/{session_id}/derive")
+    def derive_research_session(
+        session_id: str,
+        payload: DeriveResearchSessionRequest,
+    ) -> dict[str, Any]:
+        try:
+            return _scholarly_service().derive_session(session_id, payload.topic.strip())
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.get("/research/sessions/{session_id}/export.md", response_class=PlainTextResponse)
+    def export_research_session_markdown(session_id: str) -> str:
+        try:
+            return _scholarly_service().export_markdown(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.get("/research/sessions/{session_id}/export.bib", response_class=PlainTextResponse)
+    def export_research_session_bibtex(session_id: str) -> str:
+        try:
+            return _scholarly_service().export_bibtex(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
 
     return app
 

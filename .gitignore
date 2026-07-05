@@ -6,6 +6,7 @@ backend/src/services/__pycache__/
 backend/*.egg-info/
 backend/src/*.egg-info/
 backend/*.log
+backend/*.sqlite3
 .pytest_cache/
 .ruff_cache/
 

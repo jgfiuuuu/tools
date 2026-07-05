@@ -90,6 +90,41 @@ class Configuration(BaseModel):
         title="LLM Model ID",
         description="Optional model identifier for custom OpenAI-compatible services",
     )
+    scholarly_db_path: str = Field(
+        default="./scholarly_sessions.sqlite3",
+        title="Scholarly DB Path",
+        description="SQLite database path for research sessions",
+    )
+    scholarly_candidate_limit: int = Field(
+        default=50,
+        title="Scholarly Candidate Limit",
+        description="Number of unique papers to recall before screening",
+    )
+    scholarly_selection_limit: int = Field(
+        default=20,
+        title="Scholarly Selection Limit",
+        description="Number of papers selected for the workbench by default",
+    )
+    openalex_api_key: Optional[str] = Field(
+        default=None,
+        title="OpenAlex API Key",
+        description="Optional OpenAlex API key or token",
+    )
+    openalex_email: Optional[str] = Field(
+        default=None,
+        title="OpenAlex Email",
+        description="Optional email for OpenAlex polite pool requests",
+    )
+    semantic_scholar_api_key: Optional[str] = Field(
+        default=None,
+        title="Semantic Scholar API Key",
+        description="Optional API key for Semantic Scholar",
+    )
+    unpaywall_email: Optional[str] = Field(
+        default=None,
+        title="Unpaywall Email",
+        description="Optional email for future open-access lookup",
+    )
 
     @classmethod
     def from_env(cls, overrides: Optional[dict[str, Any]] = None) -> "Configuration":
@@ -119,6 +154,13 @@ class Configuration(BaseModel):
             "search_api": os.getenv("SEARCH_API"),
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
+            "scholarly_db_path": os.getenv("SCHOLARLY_DB_PATH"),
+            "scholarly_candidate_limit": os.getenv("SCHOLARLY_CANDIDATE_LIMIT"),
+            "scholarly_selection_limit": os.getenv("SCHOLARLY_SELECTION_LIMIT"),
+            "openalex_api_key": os.getenv("OPENALEX_API_KEY"),
+            "openalex_email": os.getenv("OPENALEX_EMAIL"),
+            "semantic_scholar_api_key": os.getenv("SEMANTIC_SCHOLAR_API_KEY"),
+            "unpaywall_email": os.getenv("UNPAYWALL_EMAIL"),
         }
 
         for key, value in env_aliases.items():
