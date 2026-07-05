@@ -3,12 +3,12 @@
     class="workspace"
     :class="{
       'left-collapsed': !leftSidebarOpen,
-      'right-collapsed': !rightSidebarOpen
+      'report-mode': workspaceMode === 'report'
     }"
   >
     <aside class="left-rail">
-      <div class="rail-top">
-        <div class="brand-lockup" :class="{ compact: !leftSidebarOpen }">
+      <div class="rail-top" :class="{ compact: !leftSidebarOpen }">
+        <div v-if="leftSidebarOpen" class="brand-lockup">
           <div class="brand-mark">MM</div>
           <div v-if="leftSidebarOpen">
             <h1>文献妙妙屋</h1>
@@ -16,26 +16,94 @@
           </div>
         </div>
         <button
-          class="rail-toggle left-handle"
+          class="rail-toggle icon-frame"
           type="button"
           :aria-label="leftSidebarOpen ? '收起左侧栏' : '展开左侧栏'"
           @click="toggleLeftSidebar"
         >
-          <span class="handle-dots" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-          <span
-            class="handle-arrow"
+          <svg
+            viewBox="0 0 24 24"
+            class="toggle-icon"
             :class="{ collapsed: !leftSidebarOpen }"
             aria-hidden="true"
-          ></span>
+          >
+            <path
+              d="M14.5 6 9 12l5.5 6M19 6l-5.5 6L19 18"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.8"
+            />
+          </svg>
         </button>
       </div>
 
-      <div v-if="leftSidebarOpen" class="rail-body">
-        <form class="topic-form" @submit.prevent="startResearch">
+      <nav v-if="!leftSidebarOpen" class="rail-quicklinks" aria-label="左栏快捷入口">
+        <button
+          class="quicklink-btn"
+          type="button"
+          aria-label="输入研究"
+          title="输入研究"
+          @click="openLeftRailSection('research')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M7 4.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V6A1.5 1.5 0 0 1 7.5 4.5Z"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+            <path
+              d="M14 4.5V9h4.5M9 15.5l2.2 2.2 4.8-4.9"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.6"
+            />
+          </svg>
+        </button>
+        <button
+          class="quicklink-btn"
+          type="button"
+          aria-label="History"
+          title="History"
+          @click="openLeftRailSection('history')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M5 12a7 7 0 1 0 2.1-5M5 4v4h4M12 8.5V12l2.8 1.8"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.6"
+            />
+          </svg>
+        </button>
+        <button
+          class="quicklink-btn"
+          type="button"
+          aria-label="当前流程"
+          title="当前流程"
+          @click="openLeftRailSection('logs')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4.5 16h3l2.2-6 3.6 10 2.2-6h4"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.8"
+            />
+          </svg>
+        </button>
+      </nav>
+
+      <div v-else ref="leftRailBodyRef" class="rail-body">
+        <form ref="researchSectionRef" class="topic-form" @submit.prevent="startResearch">
           <div class="form-head">
             <p class="eyebrow">New Session</p>
             <h2>新建调研</h2>
@@ -43,6 +111,7 @@
           <label>
             <span>研究问题</span>
             <textarea
+              ref="topicTextareaRef"
               v-model="topicInput"
               rows="5"
               placeholder="例如：How do retrieval augmented language models improve code generation?"
@@ -67,7 +136,7 @@
           </div>
         </form>
 
-        <section class="side-block">
+        <section ref="historySectionRef" class="side-block">
           <div class="section-title">
             <h2>历史会话</h2>
             <button class="text-btn" type="button" @click="loadSessions()">
@@ -111,9 +180,9 @@
           </div>
         </section>
 
-        <section class="side-block">
+        <section ref="logsSectionRef" class="side-block">
           <div class="section-title">
-            <h2>流程记录</h2>
+            <h2>当前流程</h2>
             <div class="side-actions">
               <button
                 v-if="progressLogs.length > 5"
@@ -138,121 +207,158 @@
       </div>
     </aside>
 
-    <section class="center-stage">
-      <header class="stage-header">
-        <div class="stage-heading">
-          <div class="stage-heading-top">
-            <p class="eyebrow">Literature Focus</p>
-            <span v-if="currentSession" class="status-pill subtle">
-              {{ sessionStatusLabel(currentSession.status) }}
+    <section class="stage-shell">
+      <header class="utility-bar">
+        <div class="utility-copy">
+          <h2 :title="currentSession?.topic || ''">{{ currentSessionShortTitle }}</h2>
+          <div v-if="currentSession" class="utility-meta">
+            <span
+              v-for="item in utilityMetaItems"
+              :key="item"
+              class="utility-meta-item"
+            >
+              {{ item }}
             </span>
           </div>
-          <h2 :title="currentSession?.topic || ''">
-            {{ currentSession?.topic || "请选择或创建一个调研会话" }}
-          </h2>
-          <div v-if="currentSession" class="stage-meta-stack">
-            <p class="stage-meta-line">{{ currentSessionSummaryText }}</p>
-          </div>
-        </div>
-
-        <div v-if="currentSession" class="stage-actions">
-          <button
-            class="primary-btn"
-            type="button"
-            :disabled="reporting || !confirmedCount"
-            @click="generateReport"
-          >
-            {{ reporting ? "生成中..." : "生成研究报告" }}
-          </button>
-          <button class="secondary-btn" type="button" @click="openReportPanel">
-            打开研究报告
-          </button>
+          <p v-else class="muted">选择或创建一个调研会话，主舞台只保留论文工作台。</p>
         </div>
       </header>
 
       <p v-if="error" class="banner error-banner">{{ error }}</p>
 
-      <section v-if="currentSession" class="process-strip">
-        <div class="process-summary" :title="currentSessionSourceText">
-          <span class="process-label">Sources</span>
-          <span class="process-text">{{ currentSessionSourceText }}</span>
-        </div>
-
-        <div
-          v-if="frontierStatusText || candidatePoolText || sourceHealthText"
-          class="session-summary-grid"
-        >
-          <article v-if="frontierStatusText" class="session-summary-card">
-            <span class="session-summary-label">Frontier</span>
-            <strong>{{ frontierStatusText }}</strong>
-            <p class="muted">{{ frontierReasonText }}</p>
-          </article>
-
-          <article v-if="candidatePoolText" class="session-summary-card">
-            <span class="session-summary-label">Candidates</span>
-            <strong>{{ candidatePoolText }}</strong>
-            <p class="muted">{{ candidatePoolDetailText }}</p>
-          </article>
-
-          <article v-if="sourceHealthText" class="session-summary-card">
-            <span class="session-summary-label">Source Health</span>
-            <strong>{{ sourceHealthText }}</strong>
-            <p class="muted">{{ sourceHealthDetailText }}</p>
-          </article>
-        </div>
-
-        <details v-if="degradationNotices.length" class="process-detail compact-banner warning-banner">
-          <summary>
-            <span class="process-detail-label">降级提示</span>
-            <span class="process-detail-count">{{ degradationNotices.length }}</span>
-          </summary>
-          <ul>
-            <li v-for="notice in degradationNotices" :key="notice">{{ notice }}</li>
-          </ul>
-        </details>
-
-        <details
-          v-if="queryTasks.length"
-          class="process-detail query-board"
-          :open="queryBoardOpen"
-          @toggle="handleQueryBoardToggle"
-        >
-          <summary>
-            <span class="process-detail-label">检索子任务</span>
-            <span class="process-detail-count">{{ queryTasks.length }}</span>
-          </summary>
-
-          <div class="query-grid">
-            <article v-for="task in queryTasks" :key="task.subtask_id" class="query-card">
-              <div class="query-card-head">
-                <div>
-                  <h3>{{ task.concept }}</h3>
-                  <p class="muted">{{ task.intent }}</p>
-                </div>
-                <span class="query-status">{{ queryStatusLabel(task.status) }}</span>
-              </div>
-              <div class="term-list">
-                <span v-for="term in task.base_terms" :key="`${task.subtask_id}-${term}`">
-                  {{ term }}
-                </span>
-              </div>
-              <ul class="variant-list">
-                <li v-for="variant in task.variants" :key="variant.query_id">
-                  <div class="variant-head">
-                    <strong>{{ queryTypeLabel(variant.query_type) }}</strong>
-                    <span>{{ queryStatusLabel(variant.status) }} · {{ variant.result_count }} 条</span>
-                  </div>
-                  <code>{{ variant.query_text }}</code>
-                  <p class="muted">
-                    ✓ {{ formatSources(variant.sources_succeeded) }} ·
-                    ⊘ {{ formatSourceReasons(variant.sources_skipped) }} ·
-                    ✕ {{ formatSourceReasons(variant.sources_failed) }}
-                  </p>
-                </li>
-              </ul>
-            </article>
+      <section v-if="currentSession" class="tool-layer">
+        <div class="tool-strip">
+          <div class="source-pill" :title="currentSessionSourceText">
+            <span class="process-label">Sources</span>
+            <span class="process-text">{{ currentSessionSourceText }}</span>
           </div>
-        </details>
+
+          <div v-if="metricRings.length" class="metric-ring-group">
+            <button
+              v-for="ring in metricRings"
+              :key="ring.id"
+              type="button"
+              class="metric-ring"
+              :class="`tone-${ring.tone}`"
+              :style="{ '--ring-progress': `${ring.progress}%` }"
+              :aria-label="buildMetricRingAriaLabel(ring)"
+              :title="buildMetricRingTitle(ring)"
+            >
+              <span class="metric-ring-core" aria-hidden="true"></span>
+              <span class="sr-only">{{ buildMetricRingAriaLabel(ring) }}</span>
+              <span class="metric-tooltip">
+                <strong>{{ ring.label }}</strong>
+                <span
+                  v-if="ring.value || ring.caption"
+                  class="metric-tooltip-summary"
+                >
+                  {{ [ring.value, ring.caption].filter(Boolean).join(" | ") }}
+                </span>
+                <span class="metric-tooltip-detail">{{ ring.detail }}</span>
+              </span>
+            </button>
+          </div>
+
+          <div class="tool-actions">
+            <button
+              v-if="hasRuntimeDetails"
+              class="runtime-trigger"
+              :class="{ open: runtimeTrayOpen }"
+              type="button"
+              :aria-expanded="runtimeTrayOpen"
+              @click="runtimeTrayOpen = !runtimeTrayOpen"
+            >
+              <span class="runtime-trigger-label">&#x8fd0;&#x884c;&#x8be6;&#x60c5;</span>
+              <span class="runtime-badges">
+                <span
+                  v-if="degradationNotices.length"
+                  class="runtime-badge runtime-badge-warning"
+                >
+                  &#x964d;&#x7ea7; {{ degradationNotices.length }}
+                </span>
+                <span v-if="queryTasks.length" class="runtime-badge">
+                  &#x5b50;&#x4efb;&#x52a1; {{ queryTasks.length }}
+                </span>
+              </span>
+            </button>
+
+            <button
+              class="report-entry icon-frame"
+              type="button"
+              :aria-label="reportEntryTitle"
+              :title="reportEntryTitle"
+              @click="openReportDrawer"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M14.5 6 9 12l5.5 6M19 6l-5.5 6L19 18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                />
+              </svg>
+              <span v-if="reportEntryBadge" class="report-entry-count">
+                {{ reportEntryBadge }}
+              </span>
+              <span class="sr-only">{{ reportEntryTitle }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="runtimeTrayOpen && hasRuntimeDetails" class="runtime-tray">
+          <section
+            v-if="degradationNotices.length"
+            class="process-subpanel warning-banner"
+          >
+            <div class="process-subpanel-head">
+              <span class="process-subpanel-title">降级提示</span>
+              <span class="process-detail-count">{{ degradationNotices.length }}</span>
+            </div>
+            <ul>
+              <li v-for="notice in degradationNotices" :key="notice">{{ notice }}</li>
+            </ul>
+          </section>
+
+          <section v-if="queryTasks.length" class="process-subpanel query-board">
+            <div class="process-subpanel-head">
+              <span class="process-subpanel-title">检索子任务</span>
+              <span class="process-detail-count">{{ queryTasks.length }}</span>
+            </div>
+
+            <div class="query-grid">
+              <article v-for="task in queryTasks" :key="task.subtask_id" class="query-card">
+                <div class="query-card-head">
+                  <div>
+                    <h3>{{ task.concept }}</h3>
+                    <p class="muted">{{ task.intent }}</p>
+                  </div>
+                  <span class="query-status">{{ queryStatusLabel(task.status) }}</span>
+                </div>
+                <div class="term-list">
+                  <span v-for="term in task.base_terms" :key="`${task.subtask_id}-${term}`">
+                    {{ term }}
+                  </span>
+                </div>
+                <ul class="variant-list">
+                  <li v-for="variant in task.variants" :key="variant.query_id">
+                    <div class="variant-head">
+                      <strong>{{ queryTypeLabel(variant.query_type) }}</strong>
+                      <span>{{ queryStatusLabel(variant.status) }} · {{ variant.result_count }} 条</span>
+                    </div>
+                    <code>{{ variant.query_text }}</code>
+                    <p class="muted">
+                      ✓ {{ formatSources(variant.sources_succeeded) }} ·
+                      ⊘ {{ formatSourceReasons(variant.sources_skipped) }} ·
+                      ✕ {{ formatSourceReasons(variant.sources_failed) }}
+                    </p>
+                  </li>
+                </ul>
+              </article>
+            </div>
+          </section>
+        </div>
       </section>
 
       <section v-if="currentSession" class="filter-bar">
@@ -308,49 +414,206 @@
           </div>
         </div>
 
-        <div v-if="currentSession && filteredPapers.length" class="paper-list">
-          <article
+        <div v-if="currentSession && filteredPapers.length" ref="paperListRef" class="paper-list">
+          <div
             v-for="paper in filteredPapers"
             :key="paper.id"
-            class="paper-row"
-            :class="{
-              active: activePaper?.id === paper.id,
-              excluded: paper.user_status === 'excluded'
-            }"
-            @click="selectPaper(paper.id)"
+            class="paper-stack"
+            :data-paper-stack-id="paper.id"
           >
-            <div class="paper-rank">{{ String(paper.rank).padStart(2, '0') }}</div>
-            <div class="paper-main">
-              <div class="paper-title-row">
-                <h3>{{ paper.title }}</h3>
-                <span class="paper-year">{{ paper.year || "n.d." }}</span>
+            <article
+              class="paper-row"
+              :class="{
+                active: activePaper?.id === paper.id,
+                excluded: paper.user_status === 'excluded'
+              }"
+              @click="togglePaperExpansion(paper.id)"
+            >
+              <div class="paper-rank">{{ String(paper.rank).padStart(2, '0') }}</div>
+              <div class="paper-main">
+                <div class="paper-title-row">
+                  <h3>{{ paper.title }}</h3>
+                  <span class="paper-year">{{ paper.year || "n.d." }}</span>
+                </div>
+                <p class="paper-authors">{{ compactAuthors(paper.authors) }}</p>
+                <div class="paper-tags">
+                  <span :class="['label-chip', paper.relevance_label]">
+                    {{ relevanceLabel(paper.relevance_label) }}
+                  </span>
+                  <span v-for="tag in paper.tags" :key="`${paper.id}-${tag}`">
+                    {{ tag }}
+                  </span>
+                  <span>{{ paper.source || "unknown" }}</span>
+                </div>
+                <p class="paper-summary">{{ paper.ai_reason }}</p>
               </div>
-              <p class="paper-authors">{{ compactAuthors(paper.authors) }}</p>
-              <div class="paper-tags">
-                <span :class="['label-chip', paper.relevance_label]">
-                  {{ relevanceLabel(paper.relevance_label) }}
-                </span>
-                <span v-for="tag in paper.tags" :key="`${paper.id}-${tag}`">
-                  {{ tag }}
-                </span>
-                <span>{{ paper.source || "unknown" }}</span>
+              <div class="paper-side" @click.stop>
+                <button class="text-btn" type="button" @click.stop="togglePaperExpansion(paper.id)">
+                  {{ activePaper?.id === paper.id ? "收起" : "查看" }}
+                </button>
+                <label class="toggle-select">
+                  <input
+                    type="checkbox"
+                    :checked="paper.selected && paper.user_status !== 'excluded'"
+                    @change="togglePaperSelection(paper)"
+                  />
+                  纳入
+                </label>
               </div>
-              <p class="paper-summary">{{ paper.ai_reason }}</p>
-            </div>
-            <div class="paper-side" @click.stop>
-              <button class="text-btn" type="button" @click="selectPaper(paper.id)">
-                查看
-              </button>
-              <label class="toggle-select">
-                <input
-                  type="checkbox"
-                  :checked="paper.selected && paper.user_status !== 'excluded'"
-                  @change="togglePaperSelection(paper)"
-                />
-                纳入
-              </label>
-            </div>
-          </article>
+            </article>
+
+            <transition name="inline-detail">
+              <section
+                v-if="activePaper?.id === paper.id"
+                class="inline-detail-panel"
+              >
+                <div class="inline-detail-top">
+                  <div class="inline-detail-heading">
+                    <div class="inline-heading-top">
+                      <p class="eyebrow">Paper Detail</p>
+                      <span class="score-pill">{{ Math.round(paper.final_score * 100) }}</span>
+                    </div>
+                    <h3>{{ paper.title }}</h3>
+                    <p class="detail-authors">{{ compactAuthors(paper.authors) }}</p>
+                    <div class="detail-meta-line">
+                      <span>{{ paper.year || "n.d." }}</span>
+                      <span>{{ paper.venue || "Unknown venue" }}</span>
+                      <span>{{ paper.citation_count }} citations</span>
+                      <span>{{ paper.source || "unknown" }}</span>
+                    </div>
+                  </div>
+
+                  <div class="detail-actions">
+                    <a
+                      v-if="resolvePaperLink(paper)"
+                      class="primary-link"
+                      :href="resolvePaperLink(paper) || undefined"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      打开论文
+                    </a>
+                    <a
+                      v-if="currentSession"
+                      class="secondary-link"
+                      :href="exportBibtexHref"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      BibTeX
+                    </a>
+                  </div>
+                </div>
+
+                <section class="detail-block">
+                  <div class="section-title detail-section-title">
+                    <h3>摘要</h3>
+                    <span :class="['label-chip', paper.relevance_label]">
+                      {{ relevanceLabel(paper.relevance_label) }}
+                    </span>
+                  </div>
+                  <p class="reading-copy">
+                    {{ paper.abstract || "暂无摘要。请打开论文链接进一步确认。" }}
+                  </p>
+                  <div class="ai-note">
+                    <span class="ai-note-label">AI 判断</span>
+                    <p>{{ paper.ai_reason }}</p>
+                  </div>
+                </section>
+
+                <section class="detail-block">
+                  <div class="section-title detail-section-title">
+                    <h3>引用 / BibTeX</h3>
+                  </div>
+                  <div class="cite-box">
+                    <p class="cite-text">{{ buildCitationText(paper) }}</p>
+                    <div class="cite-actions">
+                      <button class="text-btn" type="button" @click="copyCitation(paper)">
+                        复制参考格式
+                      </button>
+                      <a
+                        class="secondary-link"
+                        :href="exportBibtexHref"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        导出 BibTeX
+                      </a>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="detail-block">
+                  <div class="section-title detail-section-title">
+                    <h3>状态操作</h3>
+                  </div>
+                  <div class="status-actions">
+                    <button
+                      type="button"
+                      :class="{ active: paper.user_status === 'included' }"
+                      @click="setPaperStatus(paper, 'included')"
+                    >
+                      确认
+                    </button>
+                    <button
+                      type="button"
+                      :class="{ active: paper.user_status === 'to_read' }"
+                      @click="setPaperStatus(paper, 'to_read')"
+                    >
+                      待读
+                    </button>
+                    <button
+                      type="button"
+                      :class="{ active: paper.user_status === 'saved' }"
+                      @click="setPaperStatus(paper, 'saved')"
+                    >
+                      收藏
+                    </button>
+                    <button
+                      type="button"
+                      :class="{
+                        active: paper.user_status === 'excluded',
+                        danger: paper.user_status === 'excluded'
+                      }"
+                      @click="setPaperStatus(paper, 'excluded')"
+                    >
+                      排除
+                    </button>
+                  </div>
+                </section>
+
+                <section v-if="paper.query_matches.length" class="detail-block">
+                  <div class="section-title detail-section-title">
+                    <h3>检索命中</h3>
+                  </div>
+                  <ul class="match-list">
+                    <li
+                      v-for="match in paper.query_matches"
+                      :key="`${paper.id}-${match.subtask_id}-${match.query_type}-${match.source}`"
+                    >
+                      <strong>{{ match.concept }}</strong>
+                      <span>{{ queryTypeLabel(match.query_type) }} · {{ match.source }}</span>
+                      <code>{{ match.query_text }}</code>
+                    </li>
+                  </ul>
+                </section>
+
+                <form class="derive-form detail-block" @submit.prevent="deriveFromActivePaper">
+                  <label>
+                    <span>派生会话</span>
+                    <input
+                      v-model="deriveTopic"
+                      type="text"
+                      :placeholder="`围绕 ${paper.title.slice(0, 28)}... 继续深挖`"
+                    />
+                  </label>
+                  <button class="secondary-btn" type="submit" :disabled="!deriveTopic.trim()">
+                    派生
+                  </button>
+                </form>
+              </section>
+            </transition>
+          </div>
         </div>
 
         <div v-else-if="currentSession" class="empty-state">
@@ -360,263 +623,140 @@
 
         <div v-else class="empty-state">
           <p>先创建一个调研会话。</p>
-          <p class="muted">文献妙妙屋会把检索、筛选、精读和研究报告集中到同一工作台里。</p>
+          <p class="muted">主舞台会把检索、筛选、精读和报告都收拢到同一个工作台里。</p>
         </div>
       </section>
-    </section>
 
-    <aside class="right-rail">
-      <div class="rail-top right-top">
-        <div v-if="rightSidebarOpen" class="panel-switch">
-          <button
-            type="button"
-            :class="{ active: rightPanelTab === 'detail' }"
-            @click="showDetailTab"
-          >
-            文献详情
-          </button>
-          <button
-            type="button"
-            :class="{ active: rightPanelTab === 'report' }"
-            @click="showReportTab"
-          >
-            研究报告
-          </button>
-        </div>
-        <button
-          class="rail-toggle right-handle"
-          type="button"
-          :aria-label="rightSidebarOpen ? '收起右侧栏' : '展开右侧栏'"
-          @click="toggleRightSidebar"
+      <transition name="report-drawer">
+        <div
+          v-if="workspaceMode === 'report'"
+          class="report-drawer-shell"
+          @click.self="closeReportDrawer"
         >
-          <span class="handle-dots" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
-          <span
-            class="handle-arrow"
-            :class="{ collapsed: !rightSidebarOpen }"
-            aria-hidden="true"
-          ></span>
-        </button>
-      </div>
-
-      <div v-if="rightSidebarOpen" class="right-body">
-        <section
-          v-if="rightPanelTab === 'detail'"
-          ref="detailScrollRef"
-          class="panel-scroll"
-        >
-          <template v-if="activePaper">
-            <div class="detail-hero">
-              <div class="detail-heading">
-                <div class="detail-heading-top">
-                  <p class="eyebrow">Paper Detail</p>
-                  <span class="score-pill">{{ Math.round(activePaper.final_score * 100) }}</span>
-                </div>
-                <h2>{{ activePaper.title }}</h2>
-                <p class="detail-authors">{{ compactAuthors(activePaper.authors) }}</p>
-                <div class="detail-meta-line">
-                  <span>{{ activePaper.year || "n.d." }}</span>
-                  <span>{{ activePaper.venue || "Unknown venue" }}</span>
-                  <span>{{ activePaper.citation_count }} citations</span>
-                  <span>{{ activePaper.source || "unknown" }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="detail-actions">
-              <a
-                v-if="activePaperLink"
-                class="primary-link"
-                :href="activePaperLink"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                打开论文
-              </a>
-              <a
-                v-if="currentSession"
-                class="secondary-link"
-                :href="exportBibtexHref"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                导出 BibTeX
-              </a>
-            </div>
-
-            <div class="status-actions">
+          <aside class="report-drawer">
+            <header class="report-drawer-header">
               <button
+                class="report-back icon-frame"
                 type="button"
-                :class="{ active: activePaper.user_status === 'included' }"
-                @click="setPaperStatus(activePaper, 'included')"
+                aria-label="&#x8fd4;&#x56de;&#x8bba;&#x6587;&#x5de5;&#x4f5c;&#x53f0;"
+                title="&#x8fd4;&#x56de;&#x8bba;&#x6587;&#x5de5;&#x4f5c;&#x53f0;"
+                @click="closeReportDrawer"
               >
-                确认
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M9.5 6 15 12l-5.5 6M5 6l5.5 6L5 18"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+                <span class="sr-only">&#x8fd4;&#x56de;&#x5de5;&#x4f5c;&#x53f0;</span>
               </button>
-              <button
-                type="button"
-                :class="{ active: activePaper.user_status === 'to_read' }"
-                @click="setPaperStatus(activePaper, 'to_read')"
-              >
-                待读
-              </button>
-              <button
-                type="button"
-                :class="{ active: activePaper.user_status === 'saved' }"
-                @click="setPaperStatus(activePaper, 'saved')"
-              >
-                收藏
-              </button>
-              <button
-                type="button"
-                :class="{ danger: activePaper.user_status === 'excluded' }"
-                @click="setPaperStatus(activePaper, 'excluded')"
-              >
-                排除
-              </button>
-            </div>
 
-            <section class="detail-block detail-block-primary">
-              <div class="section-title detail-section-title">
-                <h3>摘要</h3>
-                <span :class="['label-chip', activePaper.relevance_label]">
-                  {{ relevanceLabel(activePaper.relevance_label) }}
-                </span>
+              <div class="report-drawer-copy">
+                <p class="eyebrow">Report Mode</p>
+                <h2>{{ currentSession?.topic || "研究报告" }}</h2>
+                <p class="muted">&#x8986;&#x76d6;&#x4e2d;&#x592e;&#x5de5;&#x4f5c;&#x53f0;&#x7684;&#x62a5;&#x544a;&#x9605;&#x8bfb;&#x6a21;&#x5f0f;</p>
               </div>
-              <p class="reading-copy">
-                {{ activePaper.abstract || "暂无摘要。请打开论文链接进一步确认。" }}
-              </p>
-              <div class="ai-note">
-                <span class="ai-note-label">AI 判断</span>
-                <p>{{ activePaper.ai_reason }}</p>
-              </div>
-            </section>
 
-            <section class="detail-block detail-block-secondary">
-              <div class="section-title detail-section-title">
-                <h3>引用</h3>
-              </div>
-              <div class="cite-box">
-                <p class="cite-text">{{ activePaperCitation }}</p>
-                <div class="cite-actions">
-                  <button class="text-btn" type="button" @click="copyCitation(activePaper)">
-                    复制参考格式
-                  </button>
-                  <a
-                    class="secondary-link"
-                    :href="exportBibtexHref"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    BibTeX
-                  </a>
-                </div>
-              </div>
-            </section>
-
-            <section v-if="activePaper.query_matches.length" class="detail-block">
-              <div class="section-title detail-section-title">
-                <h3>检索命中</h3>
-              </div>
-              <ul class="match-list">
-                <li
-                  v-for="match in activePaper.query_matches"
-                  :key="`${activePaper.id}-${match.subtask_id}-${match.query_type}-${match.source}`"
+              <div class="report-drawer-actions">
+                <button
+                  class="secondary-btn"
+                  type="button"
+                  :disabled="reporting || !confirmedCount"
+                  @click="generateReport"
                 >
-                  <strong>{{ match.concept }}</strong>
-                  <span>{{ queryTypeLabel(match.query_type) }} · {{ match.source }}</span>
-                  <code>{{ match.query_text }}</code>
-                </li>
-              </ul>
-            </section>
+                  {{ reporting ? "生成中..." : reportActionLabel }}
+                </button>
+                <a
+                  v-if="currentSession && hasReportContent"
+                  class="text-btn report-export-link"
+                  :href="exportMarkdownHref"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  导出
+                </a>
+              </div>
+            </header>
 
-            <form class="derive-form" @submit.prevent="deriveFromActivePaper">
-              <label>
-                <span>派生新会话</span>
-                <input
-                  v-model="deriveTopic"
-                  type="text"
-                  :placeholder="`围绕 ${activePaper.title.slice(0, 28)}... 继续深挖`"
-                />
-              </label>
-              <button class="secondary-btn" type="submit" :disabled="!deriveTopic.trim()">
-                派生
-              </button>
-            </form>
-          </template>
-
-          <div v-else class="empty-state inset">
-            <p>选择一篇论文查看详情。</p>
-            <p class="muted">右侧会显示摘要、引用、命中的检索子任务和派生入口。</p>
-          </div>
-        </section>
-
-        <section
-          v-else
-          ref="reportScrollRef"
-          class="panel-scroll"
-        >
-          <div class="report-hero">
-            <div>
-              <p class="eyebrow">Research Report</p>
-              <h2>{{ reportHeading }}</h2>
-              <p class="muted report-summary">基于当前已确认文献的研究备忘录</p>
-            </div>
-            <span v-if="confirmedCount" class="memo-badge">{{ confirmedCount }} 篇已确认</span>
-          </div>
-
-          <template v-if="reportSections.length">
-            <nav class="report-toc">
-              <button
-                v-for="section in reportSections"
-                :key="section.id"
-                type="button"
-                @click="scrollReportTo(section.id)"
-              >
-                {{ section.title }}
-              </button>
-            </nav>
-
-            <article class="report-article">
-              <section
-                v-for="section in reportSections"
-                :id="section.id"
-                :key="section.id"
-                :data-section-id="section.id"
-                class="report-section"
-              >
-                <h3>{{ section.title }}</h3>
-                <div class="report-items">
-                  <div
-                    v-for="(item, index) in section.items"
-                    :key="`${section.id}-${index}`"
-                    class="report-item"
-                    :class="[item.kind, item.tone ?? 'plain']"
-                  >
-                    <span v-if="item.kind === 'ordered'" class="report-order">
-                      {{ item.order }}
-                    </span>
-                    <span v-if="item.tone" class="tone-chip">
-                      {{ reportToneLabel(item.tone) }}
-                    </span>
-                    <p>{{ item.text }}</p>
-                  </div>
+            <section ref="reportScrollRef" class="report-body">
+              <div class="report-hero">
+                <div class="report-heading">
+                  <p class="eyebrow">Research Report</p>
+                  <h2>{{ reportHeading }}</h2>
+                  <p class="muted report-summary">基于当前已确认文献的研究备忘录</p>
                 </div>
-              </section>
-            </article>
-          </template>
+                <span v-if="confirmedCount" class="memo-badge">{{ confirmedCount }} 篇已确认</span>
+              </div>
 
-          <pre v-else-if="currentReportMarkdown" class="report-draft">{{ currentReportMarkdown }}</pre>
+              <template v-if="reportSections.length">
+                <nav class="report-toc">
+                  <button
+                    v-for="section in reportSections"
+                    :key="section.id"
+                    type="button"
+                    @click="scrollReportTo(section.id)"
+                  >
+                    {{ section.title }}
+                  </button>
+                </nav>
 
-          <div v-else class="empty-state inset">
-            <p>研究报告会基于已确认文献生成。</p>
-            <p class="muted">先确认论文，再生成一版可供判断方向、空白和下一步动作的报告。</p>
-          </div>
-        </section>
-      </div>
-    </aside>
+                <article class="report-article">
+                  <section
+                    v-for="section in reportSections"
+                    :id="section.id"
+                    :key="section.id"
+                    :data-section-id="section.id"
+                    class="report-section"
+                  >
+                    <h3>{{ section.title }}</h3>
+                    <div class="report-items">
+                      <div
+                        v-for="(item, index) in section.items"
+                        :key="`${section.id}-${index}`"
+                        class="report-item"
+                        :class="[item.kind, item.tone ?? 'plain']"
+                      >
+                        <span v-if="item.kind === 'ordered'" class="report-order">
+                          {{ item.order }}
+                        </span>
+                        <span v-if="item.tone" class="tone-chip">
+                          {{ reportToneLabel(item.tone) }}
+                        </span>
+                        <p>{{ item.text }}</p>
+                      </div>
+                    </div>
+                  </section>
+                </article>
+              </template>
+
+              <pre v-else-if="currentReportMarkdown" class="report-draft">{{ currentReportMarkdown }}</pre>
+
+              <div v-else-if="reporting" class="empty-state inset">
+                <p>正在生成报告草稿。</p>
+                <p class="muted">SSE 流会把内容逐段写入这个抽屉，列表上下文不会丢失。</p>
+              </div>
+
+              <div v-else class="empty-state inset">
+                <p>还没有研究报告。</p>
+                <p class="muted">基于当前已纳入文献生成一份可供最终阅读和判断的报告。</p>
+                <button
+                  class="secondary-btn empty-action"
+                  type="button"
+                  :disabled="reporting || !confirmedCount"
+                  @click="generateReport"
+                >
+                  生成报告
+                </button>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </transition>
+    </section>
 
     <div
       v-if="deleteTargetSession"
@@ -663,15 +803,17 @@ import {
   type ResearchQueryTask,
   type ResearchReport,
   type ResearchSession,
+  type ScholarlyPaper,
   type SessionMetadata,
   type SessionMetrics,
-  type ScholarlyPaper,
   type StreamEvent
 } from "./services/api";
 
-type RightPanelTab = "detail" | "report";
+type WorkspaceMode = "papers" | "report";
+type LeftRailSection = "research" | "history" | "logs";
 type ReportTone = "evidence" | "judgment" | "speculation" | "action" | "note";
 type ReportItemKind = "paragraph" | "bullet" | "ordered";
+type MetricRingTone = "warning" | "success" | "neutral";
 
 interface ReportItem {
   kind: ReportItemKind;
@@ -686,14 +828,24 @@ interface ReportSection {
   items: ReportItem[];
 }
 
+interface MetricRing {
+  id: string;
+  label: string;
+  value: string;
+  caption: string;
+  detail: string;
+  progress: number;
+  tone: MetricRingTone;
+}
+
 const APP_TITLE = "文献妙妙屋";
 const LEFT_PANEL_KEY = "miaowen:left-panel";
-const RIGHT_PANEL_KEY = "miaowen:right-panel";
-const QUERY_BOARD_KEY = "miaowen:query-board";
+const RUNTIME_TRAY_KEY = "miaowen:runtime-tray";
 
 const sessions = ref<ResearchSession[]>([]);
 const currentSession = ref<ResearchSession | null>(null);
 const activePaperId = ref<string | null>(null);
+const workspaceMode = ref<WorkspaceMode>("papers");
 const topicInput = ref("");
 const deriveTopic = ref("");
 const progressLogs = ref<string[]>([]);
@@ -703,9 +855,8 @@ const reporting = ref(false);
 const reportText = ref("");
 const showAllLogs = ref(false);
 const leftSidebarOpen = ref(readStoredBoolean(LEFT_PANEL_KEY, true));
-const rightSidebarOpen = ref(readStoredBoolean(RIGHT_PANEL_KEY, true));
-const queryBoardOpen = ref(readStoredBoolean(QUERY_BOARD_KEY, false));
-const rightPanelTab = ref<RightPanelTab>("detail");
+const runtimeTrayOpen = ref(readStoredBoolean(RUNTIME_TRAY_KEY, false));
+const savedPaperListScrollTop = ref(0);
 const deleteTargetSession = ref<ResearchSession | null>(null);
 const deletingSessionId = ref<string | null>(null);
 
@@ -717,7 +868,13 @@ const filters = reactive({
 });
 
 let currentController: AbortController | null = null;
-const detailScrollRef = ref<HTMLElement | null>(null);
+
+const leftRailBodyRef = ref<HTMLElement | null>(null);
+const researchSectionRef = ref<HTMLElement | null>(null);
+const historySectionRef = ref<HTMLElement | null>(null);
+const logsSectionRef = ref<HTMLElement | null>(null);
+const topicTextareaRef = ref<HTMLTextAreaElement | null>(null);
+const paperListRef = ref<HTMLElement | null>(null);
 const reportScrollRef = ref<HTMLElement | null>(null);
 
 const papers = computed(() => currentSession.value?.papers ?? []);
@@ -738,6 +895,9 @@ const sessionMetrics = computed<SessionMetrics>(() =>
 const degradationNotices = computed(
   () => currentSession.value?.degradation_notices ?? []
 );
+const hasRuntimeDetails = computed(
+  () => degradationNotices.value.length > 0 || queryTasks.value.length > 0
+);
 const confirmedCount = computed(
   () =>
     papers.value.filter(
@@ -745,39 +905,57 @@ const confirmedCount = computed(
     ).length
 );
 const activePaper = computed(() => {
-  if (!papers.value.length) {
+  if (!papers.value.length || !activePaperId.value) {
     return null;
   }
-  return (
-    papers.value.find((paper) => paper.id === activePaperId.value) ??
-    papers.value[0]
-  );
+  return papers.value.find((paper) => paper.id === activePaperId.value) ?? null;
 });
-const activePaperLink = computed(() =>
-  activePaper.value ? resolvePaperLink(activePaper.value) : null
-);
-const activePaperCitation = computed(() =>
-  activePaper.value ? buildCitationText(activePaper.value) : ""
-);
 const currentReportMarkdown = computed(
   () => reportText.value || latestReport.value?.content_markdown || ""
 );
+const hasReportContent = computed(() => Boolean(currentReportMarkdown.value.trim()));
 const parsedReport = computed(() => parseReportMarkdown(currentReportMarkdown.value));
 const reportHeading = computed(() => parsedReport.value.title || "研究报告");
 const reportSections = computed(() => parsedReport.value.sections);
-const currentSessionSummaryText = computed(() => {
+const currentSessionShortTitle = computed(() => {
   if (!currentSession.value) {
+    return "选择或创建调研会话";
+  }
+  return currentSession.value.topic;
+});
+const utilityMetaItems = computed(() => {
+  if (!currentSession.value) {
+    return [];
+  }
+  return [
+    `${confirmedCount.value} 已纳入`,
+    `${currentSession.value.paper_count} 候选`,
+    sessionStatusLabel(currentSession.value.status)
+  ];
+});
+const reportEntryCount = computed(() => currentSession.value?.report_count ?? 0);
+const reportEntryBadge = computed(() => {
+  if (!reportEntryCount.value) {
     return "";
   }
-  const parts = [
-    `${confirmedCount.value} / ${currentSession.value.paper_count} 已纳入`,
-    `${currentSession.value.report_count} 份报告`
-  ];
-  if (degradationNotices.value.length) {
-    parts.push(`${degradationNotices.value.length} 项降级`);
-  }
-  return parts.join(" · ");
+  return reportEntryCount.value > 9 ? "9+" : String(reportEntryCount.value);
 });
+const reportEntryTitle = computed(() =>
+  reportEntryCount.value
+    ? `\u62a5\u544a\u6a21\u5f0f | ${reportEntryCount.value} \u4efd\u62a5\u544a`
+    : "\u62a5\u544a\u6a21\u5f0f"
+);
+const reportActionLabel = computed(() =>
+  hasReportContent.value || (currentSession.value?.report_count ?? 0) > 0
+    ? "重新生成"
+    : "生成"
+);
+const exportBibtexHref = computed(() =>
+  currentSession.value ? exportUrl(currentSession.value.id, "bib") : "#"
+);
+const exportMarkdownHref = computed(() =>
+  currentSession.value ? exportUrl(currentSession.value.id, "md") : "#"
+);
 const currentSessionSourceText = computed(() => {
   if (!currentSession.value) {
     return "以文献筛选、精读和判断为中心，而不是一次性回答。";
@@ -817,11 +995,15 @@ const frontierReasonText = computed(() => {
     ? `Selected frontier papers: ${metrics.frontier_selected_count}.`
     : "";
   if (sessionMetadata.value.frontier_mode) {
-    return [formatFrontierReason(sessionMetadata.value.frontier_reason), expansionMix, frontierSelected]
+    return [
+      formatFrontierReason(sessionMetadata.value.frontier_reason),
+      expansionMix,
+      frontierSelected
+    ]
       .filter(Boolean)
       .join(" ");
   }
-  return [ "Direct high-relevance coverage was sufficient.", expansionMix ]
+  return ["Direct high-relevance coverage was sufficient.", expansionMix]
     .filter(Boolean)
     .join(" ");
 });
@@ -846,9 +1028,7 @@ const candidatePoolDetailText = computed(() => {
   const metrics = sessionMetrics.value;
   const parts = [
     `queries direct ${metrics.direct_query_count ?? 0}`,
-    metrics.frontier_query_count
-      ? `frontier ${metrics.frontier_query_count}`
-      : "",
+    metrics.frontier_query_count ? `frontier ${metrics.frontier_query_count}` : "",
     `purity ${formatPercent(metrics.candidate_pool_purity)}`,
     `drift ${formatPercent(metrics.candidate_drift_score)}`,
     `coverage ${formatPercent(metrics.direct_hit_coverage)}`,
@@ -862,19 +1042,29 @@ const candidatePoolDetailText = computed(() => {
   return parts.join(" | ");
 });
 
-const sourceHealthText = computed(() => {
-  if (!currentSession.value) {
-    return "";
-  }
-  const statuses = Object.values(currentSession.value.source_statuses ?? {});
-  if (!statuses.length) {
-    return "";
-  }
+const sourceHealthCounts = computed(() => {
+  const statuses = Object.values(currentSession.value?.source_statuses ?? {});
   const healthy = statuses.filter((status) => status === "ok").length;
   const degraded = statuses.filter((status) =>
     ["failed", "partial_failure"].includes(status)
   ).length;
   const skipped = statuses.filter((status) => status.startsWith("skipped")).length;
+  return {
+    healthy,
+    degraded,
+    skipped,
+    total: statuses.length
+  };
+});
+
+const sourceHealthText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const { healthy, degraded, skipped } = sourceHealthCounts.value;
+  if (!healthy && !degraded && !skipped) {
+    return "";
+  }
   return `healthy ${healthy} | degraded ${degraded} | skipped ${skipped}`;
 });
 
@@ -909,6 +1099,47 @@ const sourceHealthDetailText = computed(() => {
   return "Session detail metadata is available for all active sources.";
 });
 
+const metricRings = computed<MetricRing[]>(() => {
+  if (!currentSession.value) {
+    return [];
+  }
+  const metrics = sessionMetrics.value;
+  const health = sourceHealthCounts.value;
+  const rawCount = Math.max(metrics.raw_paper_count ?? 0, 1);
+  const finalCount = metrics.final_candidate_count ?? 0;
+  const totalSources = Math.max(health.total, 1);
+
+  return [
+    {
+      id: "frontier",
+      label: "Frontier",
+      value: sessionMetadata.value.frontier_mode ? "ON" : "OFF",
+      caption: sessionMetadata.value.frontier_mode ? "triggered" : "steady",
+      detail: [frontierStatusText.value, frontierReasonText.value].filter(Boolean).join("\n"),
+      progress: sessionMetadata.value.frontier_mode ? 82 : 18,
+      tone: "warning"
+    },
+    {
+      id: "candidates",
+      label: "Candidates",
+      value: String(finalCount),
+      caption: `selected ${confirmedCount.value}`,
+      detail: [candidatePoolText.value, candidatePoolDetailText.value].filter(Boolean).join("\n"),
+      progress: Math.max(16, Math.min(100, Math.round((finalCount / rawCount) * 100))),
+      tone: "neutral"
+    },
+    {
+      id: "health",
+      label: "Health",
+      value: String(health.healthy),
+      caption: `skip ${health.skipped}`,
+      detail: [sourceHealthText.value, sourceHealthDetailText.value].filter(Boolean).join("\n"),
+      progress: Math.max(14, Math.min(100, Math.round((health.healthy / totalSources) * 100))),
+      tone: "success"
+    }
+  ];
+});
+
 const filteredPapers = computed(() => {
   const keyword = filters.keyword.trim().toLowerCase();
   const minYear = filters.year ? Number(filters.year) : null;
@@ -939,17 +1170,18 @@ const filteredPapers = computed(() => {
     return true;
   });
 });
+
 const visibleProgressLogs = computed(() =>
   showAllLogs.value ? progressLogs.value : progressLogs.value.slice(-5)
 );
 
-const exportBibtexHref = computed(() =>
-  currentSession.value ? exportUrl(currentSession.value.id, "bib") : "#"
-);
-
 watch(leftSidebarOpen, (value) => persistBoolean(LEFT_PANEL_KEY, value));
-watch(rightSidebarOpen, (value) => persistBoolean(RIGHT_PANEL_KEY, value));
-watch(queryBoardOpen, (value) => persistBoolean(QUERY_BOARD_KEY, value));
+watch(runtimeTrayOpen, (value) => persistBoolean(RUNTIME_TRAY_KEY, value));
+watch(hasRuntimeDetails, (value) => {
+  if (!value) {
+    runtimeTrayOpen.value = false;
+  }
+});
 watch(
   currentSession,
   (session) => {
@@ -959,6 +1191,13 @@ watch(
   },
   { immediate: true }
 );
+watch(activePaperId, (paperId, previousId) => {
+  if (!paperId || paperId === previousId) {
+    return;
+  }
+  deriveTopic.value = "";
+  void nextTick(() => scrollExpandedPaperIntoView(paperId));
+});
 
 onMounted(async () => {
   await loadSessions();
@@ -983,7 +1222,7 @@ async function loadSessions(preferredSessionId: string | null = currentSession.v
       currentSession.value = null;
       activePaperId.value = null;
       reportText.value = "";
-      rightPanelTab.value = "detail";
+      workspaceMode.value = "papers";
       return;
     }
 
@@ -1010,6 +1249,7 @@ async function loadSession(sessionId: string, options: { quiet?: boolean } = {})
     error.value = "";
     const detail = await getSession(sessionId);
     applySession(detail);
+    workspaceMode.value = "papers";
     if (!options.quiet) {
       pushLog(`已加载历史会话：${detail.topic}`);
     }
@@ -1029,8 +1269,8 @@ async function startResearch() {
   creating.value = true;
   error.value = "";
   reportText.value = "";
-  rightSidebarOpen.value = true;
-  rightPanelTab.value = "detail";
+  workspaceMode.value = "papers";
+  activePaperId.value = null;
   progressLogs.value = [];
   showAllLogs.value = false;
   pushLog(`创建调研会话：${topicInput.value.trim()}`);
@@ -1132,7 +1372,7 @@ function handleSessionEvent(event: StreamEvent) {
 
   if (event.type === "screening_done") {
     applySession(event.session as ResearchSession);
-    pushLog("筛选完成，已进入工作台");
+    pushLog("筛选完成，已进入论文工作台");
     return;
   }
 
@@ -1145,21 +1385,33 @@ function applySession(session: ResearchSession) {
   const normalized = normalizeSession(session);
   currentSession.value = normalized;
   const hasActivePaper = normalized.papers?.some((paper) => paper.id === activePaperId.value);
-  activePaperId.value = hasActivePaper
-    ? activePaperId.value
-    : normalized.papers?.[0]?.id ?? null;
-  reportText.value = normalized.reports?.[0]?.content_markdown ?? reportText.value;
+  activePaperId.value = hasActivePaper ? activePaperId.value : null;
+  deriveTopic.value = "";
+  reportText.value = normalized.reports?.[0]?.content_markdown ?? "";
   syncSessionListSummary();
-  if (rightPanelTab.value === "detail") {
-    scrollRightPanelToTop("detail");
-  }
 }
 
-function selectPaper(paperId: string) {
-  activePaperId.value = paperId;
-  rightSidebarOpen.value = true;
-  rightPanelTab.value = "detail";
-  scrollRightPanelToTop("detail");
+function openLeftRailSection(section: LeftRailSection) {
+  if (!leftSidebarOpen.value) {
+    leftSidebarOpen.value = true;
+  }
+
+  void nextTick(() => {
+    const target =
+      section === "research"
+        ? researchSectionRef.value
+        : section === "history"
+          ? historySectionRef.value
+          : logsSectionRef.value;
+    target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (section === "research") {
+      topicTextareaRef.value?.focus();
+    }
+  });
+}
+
+function togglePaperExpansion(paperId: string) {
+  activePaperId.value = activePaperId.value === paperId ? null : paperId;
 }
 
 async function togglePaperSelection(paper: ScholarlyPaper) {
@@ -1201,12 +1453,11 @@ async function generateReport() {
   }
 
   const sessionId = currentSession.value.id;
+  openReportDrawer();
   reporting.value = true;
   error.value = "";
   reportText.value = "";
-  rightSidebarOpen.value = true;
-  rightPanelTab.value = "report";
-  scrollRightPanelToTop("report");
+  scrollReportToTop();
   pushLog("开始生成研究报告");
 
   try {
@@ -1234,7 +1485,7 @@ function handleReportEvent(event: StreamEvent) {
 }
 
 async function deriveFromActivePaper() {
-  if (!currentSession.value || !deriveTopic.value.trim()) {
+  if (!currentSession.value || !deriveTopic.value.trim() || !activePaper.value) {
     return;
   }
 
@@ -1248,32 +1499,36 @@ async function deriveFromActivePaper() {
   }
 }
 
-function openReportPanel() {
-  rightSidebarOpen.value = true;
-  rightPanelTab.value = "report";
-  scrollRightPanelToTop("report");
+function openReportDrawer() {
+  savedPaperListScrollTop.value = paperListRef.value?.scrollTop ?? 0;
+  workspaceMode.value = "report";
+  scrollReportToTop();
 }
 
-function showDetailTab() {
-  rightPanelTab.value = "detail";
-  scrollRightPanelToTop("detail");
+function closeReportDrawer() {
+  workspaceMode.value = "papers";
+  void nextTick(() => {
+    paperListRef.value?.scrollTo({
+      top: savedPaperListScrollTop.value,
+      behavior: "auto"
+    });
+  });
 }
 
-function showReportTab() {
-  rightPanelTab.value = "report";
-  scrollRightPanelToTop("report");
+function buildMetricRingAriaLabel(ring: MetricRing) {
+  return [ring.label, ring.value, ring.caption, ring.detail.replace(/\n/g, ". ")]
+    .filter(Boolean)
+    .join(". ");
+}
+
+function buildMetricRingTitle(ring: MetricRing) {
+  const summary = [ring.value, ring.caption].filter(Boolean).join(" | ");
+  const detail = ring.detail.replace(/\n/g, " | ");
+  return [ring.label, summary, detail].filter(Boolean).join(": ");
 }
 
 function toggleLeftSidebar() {
   leftSidebarOpen.value = !leftSidebarOpen.value;
-}
-
-function toggleRightSidebar() {
-  rightSidebarOpen.value = !rightSidebarOpen.value;
-}
-
-function handleQueryBoardToggle(event: Event) {
-  queryBoardOpen.value = (event.currentTarget as HTMLDetailsElement).open;
 }
 
 function cancelCurrentStream() {
@@ -1324,6 +1579,39 @@ async function copyCitation(paper: ScholarlyPaper) {
   }
 }
 
+function scrollExpandedPaperIntoView(paperId: string) {
+  const container = paperListRef.value;
+  if (!container) {
+    return;
+  }
+  const target = container.querySelector<HTMLElement>(
+    `[data-paper-stack-id="${paperId}"]`
+  );
+  if (!target) {
+    return;
+  }
+
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const topComfort = 20;
+  const bottomComfort = 28;
+
+  if (targetRect.top < containerRect.top + topComfort) {
+    container.scrollBy({
+      top: targetRect.top - containerRect.top - topComfort,
+      behavior: "smooth"
+    });
+    return;
+  }
+
+  if (targetRect.bottom > containerRect.bottom - bottomComfort) {
+    container.scrollBy({
+      top: targetRect.bottom - containerRect.bottom + bottomComfort,
+      behavior: "smooth"
+    });
+  }
+}
+
 function scrollReportTo(sectionId: string) {
   const container = reportScrollRef.value;
   if (!container) {
@@ -1337,15 +1625,14 @@ function scrollReportTo(sectionId: string) {
   }
 }
 
-function pushLog(message: string) {
-  progressLogs.value = [...progressLogs.value.slice(-79), message];
+function scrollReportToTop() {
+  void nextTick(() => {
+    reportScrollRef.value?.scrollTo({ top: 0, behavior: "auto" });
+  });
 }
 
-function scrollRightPanelToTop(tab: RightPanelTab) {
-  void nextTick(() => {
-    const container = tab === "detail" ? detailScrollRef.value : reportScrollRef.value;
-    container?.scrollTo({ top: 0, behavior: "auto" });
-  });
+function pushLog(message: string) {
+  progressLogs.value = [...progressLogs.value.slice(-79), message];
 }
 
 function syncCurrentSessionCounters() {
@@ -1354,7 +1641,8 @@ function syncCurrentSessionCounters() {
   }
   currentSession.value.paper_count = currentSession.value.papers?.length ?? 0;
   currentSession.value.selected_count = confirmedCount.value;
-  currentSession.value.report_count = currentSession.value.reports?.length ?? currentSession.value.report_count;
+  currentSession.value.report_count =
+    currentSession.value.reports?.length ?? currentSession.value.report_count;
 }
 
 function syncSessionListSummary() {
@@ -1812,19 +2100,19 @@ function persistBoolean(key: string, value: boolean) {
   --bg: #e8e6e2;
   --surface: #f4f3f0;
   --surface-strong: #fafaf8;
+  --surface-muted: rgba(250, 250, 248, 0.72);
   --line: rgba(58, 52, 46, 0.16);
   --line-soft: rgba(58, 52, 46, 0.08);
-  --line-strong: rgba(58, 52, 46, 0.32);
+  --line-strong: rgba(58, 52, 46, 0.3);
   --text: #2a2622;
-  --muted: #89837c;
+  --muted: #867f78;
   --accent: #4a4238;
   --accent-strong: #363026;
   --success: #4a5647;
   --warning: #6b5d45;
   --danger: #6b4a47;
   --ink-mark: #3d3530;
-  --paper-edge: #d8d6d2;
-  --font-sans: "Inter", -apple-system, "Helvetica Neue", sans-serif;
+  --font-sans: "Avenir Next", "Segoe UI", sans-serif;
   --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-mono: "JetBrains Mono", "SF Mono", Consolas, "Cascadia Code", monospace;
   --text-2xs: 9px;
@@ -1845,18 +2133,17 @@ function persistBoolean(key: string, value: boolean) {
   --space-3xl: 32px;
   --shadow-subtle: 0 2px 4px rgba(42, 38, 34, 0.08);
   --shadow-medium: 0 4px 12px rgba(42, 38, 34, 0.12);
-  --shadow-strong: 0 12px 24px rgba(42, 38, 34, 0.18);
-  --left-width: 280px;
-  --right-width: 420px;
+  --shadow-strong: 0 14px 32px rgba(42, 38, 34, 0.16);
+  --left-width: 292px;
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
   display: grid;
-  grid-template-columns: var(--left-width) minmax(0, 1fr) var(--right-width);
+  grid-template-columns: var(--left-width) minmax(0, 1fr);
   color: var(--text);
   font-family: var(--font-sans);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0)),
     repeating-linear-gradient(
       0deg,
       transparent 0,
@@ -1868,22 +2155,16 @@ function persistBoolean(key: string, value: boolean) {
 }
 
 .workspace.left-collapsed {
-  --left-width: 74px;
-}
-
-.workspace.right-collapsed {
-  --right-width: 74px;
+  --left-width: 88px;
 }
 
 .left-rail,
-.right-rail,
-.center-stage {
+.stage-shell {
   height: 100vh;
   min-height: 0;
 }
 
-.left-rail,
-.right-rail {
+.left-rail {
   display: flex;
   flex-direction: column;
   background: var(--surface);
@@ -1891,20 +2172,14 @@ function persistBoolean(key: string, value: boolean) {
   overflow: hidden;
 }
 
-.right-rail {
-  border-right: none;
-  border-left: 1px solid var(--line-soft);
-  box-shadow: -2px 0 8px rgba(42, 38, 34, 0.04);
-}
-
-.center-stage {
+.stage-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-xl);
-  padding: 22px 24px 24px;
+  gap: 14px;
   min-height: 0;
   overflow: hidden;
-  background: transparent;
+  padding: 18px 22px 22px;
 }
 
 .rail-top {
@@ -1916,36 +2191,15 @@ function persistBoolean(key: string, value: boolean) {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.right-top {
-  align-items: center;
-}
-
-.rail-body,
-.right-body {
-  min-height: 0;
-  flex: 1;
-  padding: 18px;
-}
-
-.rail-body {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-.right-body {
-  overflow: hidden;
-}
-
 .brand-lockup {
   display: flex;
   gap: 12px;
   align-items: flex-start;
 }
 
-.brand-lockup.compact {
-  width: 100%;
+.rail-top.compact {
   justify-content: center;
+  padding-inline: 0;
 }
 
 .brand-mark {
@@ -1960,38 +2214,13 @@ function persistBoolean(key: string, value: boolean) {
   letter-spacing: 0.08em;
 }
 
-.eyebrow {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-h1,
-h2,
-h3,
-h4,
-p,
-ol,
-ul,
-dl,
-dt,
-dd,
-pre {
-  margin: 0;
-}
-
 .brand-lockup h1,
-.stage-heading h2,
-.detail-hero h2,
-.report-hero h2 {
+.utility-copy h2,
+.report-drawer-copy h2,
+.report-hero h2,
+.inline-detail-heading h3,
+.dialog-panel h2 {
   font-family: var(--font-serif);
-}
-
-.paper-rank,
-code,
-.query-card code,
-.report-draft {
-  font-family: var(--font-mono);
 }
 
 .brand-lockup h1 {
@@ -1999,18 +2228,126 @@ code,
   line-height: 1.1;
 }
 
-.brand-copy {
-  font-size: var(--text-xs);
-  line-height: 1.4;
-  max-width: 22ch;
-}
-
 .brand-eyebrow {
   font-size: var(--text-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--muted);
-  line-height: 1.3;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.rail-toggle,
+.primary-btn,
+.secondary-btn,
+.ghost-btn,
+.danger-btn,
+.text-btn,
+.primary-link,
+.secondary-link,
+.report-entry,
+.report-back,
+.metric-ring,
+.quicklink-btn,
+.runtime-trigger,
+.report-toc button {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+}
+
+.icon-frame {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(255, 250, 242, 0.76);
+}
+
+.rail-toggle {
+  background: rgba(255, 250, 242, 0.76);
+}
+
+.toggle-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 160ms ease;
+}
+
+.toggle-icon.collapsed {
+  transform: rotate(180deg);
+}
+
+.rail-quicklinks {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 18px;
+}
+
+.quicklink-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.quicklink-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rail-body {
+  min-height: 0;
+  flex: 1;
+  padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.topic-form,
+.side-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-block + .side-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.topic-form {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .form-head {
@@ -2025,250 +2362,6 @@ code,
   font-family: var(--font-serif);
 }
 
-.brand-copy,
-.muted,
-.paper-authors,
-.paper-summary,
-.session-meta,
-.stage-subtitle,
-.reading-copy,
-.dialog-copy {
-  color: var(--muted);
-}
-
-.rail-toggle,
-.primary-btn,
-.secondary-btn,
-.ghost-btn,
-.danger-btn,
-.text-btn,
-.primary-link,
-.secondary-link,
-.panel-switch button {
-  appearance: none;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  text-decoration: none;
-}
-
-.rail-toggle,
-.text-btn {
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.primary-btn,
-.primary-link {
-  padding: 11px 14px;
-  background: var(--accent-strong);
-  color: #fafaf8;
-  border-color: var(--accent-strong);
-  transition: all 140ms ease;
-}
-
-.primary-btn:hover,
-.primary-link:hover {
-  background: var(--ink-mark);
-}
-
-.secondary-btn,
-.secondary-link {
-  padding: 11px 14px;
-  background: var(--surface-strong);
-  transition: all 140ms ease;
-}
-
-.secondary-btn:hover,
-.secondary-link:hover {
-  background: var(--surface);
-  box-shadow: var(--shadow-subtle);
-}
-
-.primary-link,
-.secondary-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ghost-btn,
-.danger-btn {
-  padding: 11px 14px;
-}
-
-.danger-btn {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff7f7;
-}
-
-.panel-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-  width: 100%;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.panel-switch button {
-  padding: 0 0 10px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-}
-
-.panel-switch button.active {
-  background: transparent;
-  border-color: var(--accent-strong);
-  color: var(--accent-strong);
-}
-
-.rail-toggle {
-  width: 36px;
-  min-width: 36px;
-  height: 76px;
-  padding: 0;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border-radius: 4px;
-  background: rgba(255, 250, 242, 0.76);
-}
-
-.handle-dots {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.handle-dots span {
-  width: 12px;
-  height: 1px;
-  background: var(--accent);
-}
-
-.handle-arrow {
-  width: 8px;
-  height: 8px;
-  border-right: 1px solid var(--accent);
-  border-bottom: 1px solid var(--accent);
-}
-
-.left-handle .handle-arrow {
-  transform: rotate(135deg);
-}
-
-.left-handle .handle-arrow.collapsed {
-  transform: rotate(-45deg);
-}
-
-.right-handle .handle-arrow {
-  transform: rotate(-45deg);
-}
-
-.right-handle .handle-arrow.collapsed {
-  transform: rotate(135deg);
-}
-
-.topic-form,
-.side-block,
-.query-board,
-.filter-bar,
-.paper-stage,
-.detail-block,
-.report-section {
-  border: 1px solid var(--line-soft);
-  background: var(--surface-strong);
-}
-
-.topic-form,
-.side-block,
-.paper-stage {
-  padding: 12px;
-}
-
-.side-block + .side-block {
-  margin-top: var(--space-lg);
-}
-
-.side-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.left-rail .topic-form,
-.left-rail .side-block {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.left-rail .topic-form {
-  padding-bottom: 16px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.left-rail .side-block + .side-block {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.left-rail .section-title {
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.left-rail .section-title h2 {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.left-rail .topic-form .primary-btn {
-  width: 100%;
-}
-
-.left-rail .topic-form .form-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.left-rail .text-btn {
-  padding: 4px 6px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-}
-
-.left-rail .text-btn:hover {
-  color: var(--text);
-}
-
-.left-rail textarea {
-  min-height: 112px;
-}
-
-.left-rail label > span {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .topic-form label,
 .filter-bar label,
 .derive-form label {
@@ -2277,6 +2370,15 @@ code,
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.topic-form label > span,
+.filter-bar label > span,
+.derive-form label > span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 textarea,
@@ -2307,30 +2409,100 @@ a:focus {
 }
 
 .form-actions,
-.stage-actions,
 .detail-actions,
-.dialog-actions {
+.dialog-actions,
+.report-drawer-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-md);
 }
 
-.stage-actions .primary-btn,
-.stage-actions .secondary-btn {
-  padding: 9px 12px;
+.primary-btn,
+.primary-link {
+  padding: 11px 14px;
+  background: var(--accent-strong);
+  color: #fafaf8;
+  border-color: var(--accent-strong);
+  transition: all 140ms ease;
 }
 
-.detail-actions .primary-link,
-.detail-actions .secondary-link,
-.cite-actions .secondary-link {
-  padding: 8px 10px;
-  font-size: 12px;
+.primary-btn:hover,
+.primary-link:hover {
+  background: var(--ink-mark);
 }
 
-.topic-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
+.secondary-btn,
+.secondary-link {
+  padding: 10px 14px;
+  background: var(--surface-strong);
+  transition: all 140ms ease;
+}
+
+.secondary-btn:hover,
+.secondary-link:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow-subtle);
+}
+
+.ghost-btn,
+.danger-btn,
+.text-btn {
+  padding: 10px 12px;
+}
+
+.text-btn {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.danger-btn {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff7f7;
+}
+
+.primary-link,
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-frame svg,
+.report-back svg {
+  width: 15px;
+  height: 15px;
+}
+
+.report-entry,
+.report-back {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.report-entry-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(255, 250, 242, 0.96);
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.report-entry:hover,
+.report-back:hover,
+.rail-toggle:hover,
+.quicklink-btn:hover {
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-subtle);
 }
 
 .section-title {
@@ -2338,13 +2510,35 @@ a:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-lg);
-  margin-bottom: 10px;
 }
 
 .section-title h2,
 .section-title h3 {
   font-size: 14px;
   line-height: 1.2;
+}
+
+.side-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.side-block .section-title,
+.topic-form .form-head,
+.paper-stage .section-title {
+  margin-bottom: 0;
+}
+
+.side-block .text-btn {
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+.side-block .text-btn:hover {
+  color: var(--text);
 }
 
 .session-list,
@@ -2355,6 +2549,7 @@ a:focus {
 .progress-list {
   list-style: none;
   padding: 0;
+  margin: 0;
 }
 
 .session-list {
@@ -2368,9 +2563,7 @@ a:focus {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-2xs);
   align-items: stretch;
-  border: none;
   border-left: 2px solid var(--line-soft);
-  background: transparent;
   padding-left: var(--space-md);
   transition: all 140ms ease;
 }
@@ -2401,7 +2594,7 @@ a:focus {
   cursor: pointer;
   display: grid;
   place-items: center;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1;
   opacity: 0.22;
 }
@@ -2427,6 +2620,17 @@ a:focus {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+.session-meta,
+.muted,
+.paper-authors,
+.paper-summary,
+.reading-copy,
+.dialog-copy,
+.detail-authors,
+.detail-meta-line {
+  color: var(--muted);
 }
 
 .session-meta {
@@ -2468,28 +2672,6 @@ a:focus {
   background: var(--accent);
 }
 
-.status-pill,
-.query-status,
-.memo-badge,
-.tone-chip,
-.label-chip,
-.stat-chip {
-  border: 1px solid var(--line-soft);
-  background: var(--surface-strong);
-}
-
-.status-pill,
-.query-status,
-.memo-badge,
-.tone-chip,
-.label-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
 .progress-list {
   display: flex;
   flex-direction: column;
@@ -2514,24 +2696,85 @@ a:focus {
   background: var(--accent);
 }
 
-.process-strip {
+.utility-bar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--line-soft);
   flex-shrink: 0;
 }
 
-.process-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.utility-copy {
   min-width: 0;
-  padding: 6px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.utility-copy h2 {
+  font-size: 18px;
+  line-height: 1.16;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.utility-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.utility-meta-item {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.utility-meta-item::after {
+  content: "\00b7";
+  margin-left: 10px;
+  color: var(--line);
+}
+
+.utility-meta-item:last-child::after {
+  display: none;
+}
+
+.tool-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.tool-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-pill {
+  min-width: 160px;
+  max-width: 340px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(250, 250, 248, 0.42);
+  overflow: hidden;
 }
 
 .process-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -2540,109 +2783,221 @@ a:focus {
 .process-text {
   min-width: 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.session-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.metric-ring-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.session-summary-card {
-  border: 1px solid var(--line-soft);
-  background: var(--surface-strong);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.metric-ring {
+  --ring-progress: 0%;
+  --ring-color: var(--ink-mark);
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(58, 52, 46, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
-.session-summary-label {
-  color: var(--muted);
+.metric-ring::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-color) var(--ring-progress), rgba(58, 52, 46, 0.08) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 0);
+}
+
+.metric-ring::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(58, 52, 46, 0.08);
+  background: rgba(255, 250, 242, 0.88);
+}
+
+.metric-ring.tone-warning {
+  --ring-color: var(--warning);
+}
+
+.metric-ring.tone-neutral {
+  --ring-color: var(--ink-mark);
+}
+
+.metric-ring.tone-success {
+  --ring-color: var(--success);
+}
+
+.metric-ring-core {
+  position: relative;
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ring-color);
+  opacity: 0.22;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.metric-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 8;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(250, 250, 248, 0.98);
+  box-shadow: var(--shadow-medium);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.metric-tooltip strong,
+.metric-tooltip-summary,
+.metric-tooltip-detail {
+  display: block;
+}
+
+.metric-tooltip strong {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.session-summary-card strong {
-  font-size: 13px;
-  line-height: 1.4;
+.metric-tooltip-summary {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
-.session-summary-card p {
-  font-size: 12px;
-  line-height: 1.5;
+.metric-tooltip-detail {
+  margin-top: 4px;
 }
 
-.stage-header {
+.metric-ring:hover .metric-tooltip,
+.metric-ring:focus-visible .metric-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.metric-ring:hover .metric-ring-core,
+.metric-ring:focus-visible .metric-ring-core {
+  opacity: 0.42;
+  transform: scale(1.08);
+}
+
+.tool-actions {
+  margin-left: auto;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  border-bottom: 1px solid var(--line-soft);
-  padding-bottom: var(--space-lg);
-  flex-shrink: 0;
-}
-
-.stage-heading {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
-}
-
-.stage-heading-top {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.stage-heading h2 {
-  font-size: var(--text-2xl);
-  line-height: 1.2;
+.runtime-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+  background: rgba(250, 250, 248, 0.42);
+  border-color: var(--line-soft);
+}
+
+.runtime-trigger::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1px solid var(--accent);
+  border-bottom: 1px solid var(--accent);
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.runtime-trigger.open::after {
+  transform: rotate(225deg);
+}
+
+.runtime-trigger-label {
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.detail-hero h2,
-.report-hero h2 {
-  font-size: 22px;
-  line-height: 1.2;
+.runtime-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.stage-meta-stack {
-  display: block;
-}
-
-.stage-meta-line,
-.stage-subtitle {
-  font-size: var(--text-sm);
-  line-height: 1.4;
-}
-
-.stage-meta-line {
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.stage-subtitle {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status-pill.subtle {
-  padding: 3px 8px;
+.runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.56);
   font-size: 11px;
+  line-height: 1;
+}
+
+.process-detail-count,
+.memo-badge,
+.tone-chip,
+.label-chip,
+.query-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
+  background: var(--surface-strong);
+  font-size: 12px;
+}
+
+.runtime-badge-warning {
+  color: var(--warning);
+  border-color: rgba(145, 106, 40, 0.28);
+}
+
+.runtime-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(42vh, 420px);
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .banner {
@@ -2662,88 +3017,54 @@ a:focus {
   border-color: rgba(145, 106, 40, 0.28);
 }
 
-.warning-banner ul {
-  margin-top: 8px;
-  padding-left: 18px;
-}
-
-.process-detail {
+.process-subpanel {
   border: 1px solid var(--line-soft);
-  background: var(--surface);
+  background: rgba(250, 250, 248, 0.8);
+  padding: 12px;
 }
 
-.compact-banner {
-  padding: 0;
-}
-
-.compact-banner summary {
+.process-subpanel-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  cursor: pointer;
-  list-style: none;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
-.compact-banner summary::-webkit-details-marker {
-  display: none;
-}
-
-.process-detail summary::after {
-  content: "";
-  margin-left: auto;
-  width: 7px;
-  height: 7px;
-  border-right: 1px solid var(--accent);
-  border-bottom: 1px solid var(--accent);
-  transform: rotate(45deg);
-  transition: transform 140ms ease;
-}
-
-.process-detail[open] summary::after {
-  transform: rotate(225deg);
-}
-
-.process-detail-label {
+.process-subpanel-title {
   color: var(--text);
+  font-size: 13px;
   font-weight: 600;
 }
 
-.process-detail-count {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.compact-banner ul {
+.process-subpanel ul {
   margin: 0;
-  padding: 0 18px 12px 32px;
+  padding-left: 18px;
 }
 
 .query-board {
-  padding: 0;
+  padding: 12px;
 }
 
 .query-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  padding: 0 12px 12px;
 }
 
 .query-card {
-  border-top: 1px solid var(--line-soft);
-  border-right: none;
-  border-bottom: none;
-  border-left: none;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--line-soft);
   padding: 12px;
-  background: rgba(250, 250, 248, 0.6);
+  background: var(--surface-strong);
 }
 
 .query-card-head,
 .variant-head,
 .paper-title-row,
-.detail-hero,
-.report-hero {
+.report-hero,
+.inline-detail-top,
+.inline-heading-top {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -2782,6 +3103,13 @@ a:focus {
   padding-top: 10px;
 }
 
+code,
+.paper-rank,
+.metric-value,
+.report-draft {
+  font-family: var(--font-mono);
+}
+
 code {
   display: block;
   margin: 8px 0 6px;
@@ -2796,26 +3124,10 @@ code {
   display: flex;
   align-items: center;
   gap: var(--space-md);
-  padding: 8px 12px;
+  padding: 2px 2px 8px;
   flex-shrink: 0;
-  border: none;
-  border-bottom: 1px solid var(--line-soft);
-  background: transparent;
   overflow-x: auto;
   overflow-y: hidden;
-}
-
-.filter-bar label {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-sm);
-  min-height: 36px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-weight: 500;
 }
 
 .filter-bar .search-control {
@@ -2823,21 +3135,9 @@ code {
   min-width: 0;
 }
 
-.filter-bar label span {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.filter-bar input,
-.filter-bar select {
+.filter-bar label {
+  flex: 0 0 auto;
   min-height: 36px;
-}
-
-.filter-bar .search-control input {
-  min-width: 0;
 }
 
 .filter-bar select {
@@ -2851,20 +3151,11 @@ code {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: none;
-  background: transparent;
-  padding: 0;
-}
-
-.paper-stage .section-title {
-  padding: 0 2px 8px;
-  margin-bottom: 0;
 }
 
 .paper-list {
   display: flex;
   flex-direction: column;
-  gap: 0;
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
@@ -2873,12 +3164,16 @@ code {
   border-top: 1px solid var(--line-soft);
 }
 
+.paper-stack {
+  display: flex;
+  flex-direction: column;
+}
+
 .paper-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) 92px;
   gap: var(--space-lg);
   padding: 14px 8px 14px 14px;
-  border: none;
   border-left: 2px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
   background: transparent;
@@ -2888,14 +3183,13 @@ code {
 }
 
 .paper-row:hover {
-  background: var(--surface-strong);
+  background: rgba(250, 250, 248, 0.58);
   box-shadow: var(--shadow-subtle);
 }
 
 .paper-row.active {
-  background: var(--surface-strong);
+  background: rgba(250, 250, 248, 0.78);
   border-left: 3px solid var(--ink-mark);
-  box-shadow: var(--shadow-medium);
 }
 
 .paper-row.excluded {
@@ -2985,53 +3279,41 @@ code {
   color: #6c4a87;
 }
 
-.right-body {
-  display: flex;
-  flex-direction: column;
+.inline-detail-panel {
+  padding: 0 10px 18px 78px;
+  border-left: 3px solid var(--ink-mark);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-muted);
 }
 
-.panel-scroll {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 4px;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-.detail-hero,
-.report-hero {
+.inline-detail-top {
   align-items: flex-start;
-  margin-bottom: var(--space-lg);
-  border-top: 2px solid var(--paper-edge);
-  padding-top: var(--space-xl);
+  padding: 16px 0 0;
 }
 
-.detail-heading {
+.inline-detail-heading {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  flex: 1;
 }
 
-.detail-heading-top {
-  display: flex;
+.inline-detail-heading h3 {
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.inline-heading-top {
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.detail-authors,
-.detail-meta-line {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .detail-meta-line {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .detail-meta-line span::after {
@@ -3057,14 +3339,69 @@ code {
   font-weight: 700;
 }
 
-.detail-actions,
-.status-actions {
-  margin-bottom: 12px;
+.detail-actions {
+  align-items: flex-start;
 }
 
-.detail-actions {
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line-soft);
+.detail-actions .primary-link,
+.detail-actions .secondary-link,
+.cite-actions .secondary-link {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.detail-block {
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.reading-copy {
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-section-title {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ai-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line-soft);
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.7;
+}
+
+.ai-note-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cite-box {
+  border: 1px solid var(--line-soft);
+  background: var(--surface-strong);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cite-text {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.cite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .status-actions {
@@ -3092,59 +3429,10 @@ code {
   color: var(--danger);
 }
 
-.cite-box {
-  border: 1px solid var(--line-soft);
-  background: var(--surface-strong);
-  padding: 10px 12px;
-}
-
-.detail-block {
-  padding: 12px;
-  margin-bottom: 12px;
-}
-
-.reading-copy {
-  line-height: 1.75;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.detail-section-title {
-  align-items: center;
-}
-
-.ai-note {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--line-soft);
-  color: var(--muted);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  line-height: 1.7;
-}
-
-.ai-note-label {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.cite-box {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.cite-text {
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.cite-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+.status-actions button.danger.active {
+  color: #fff7f7;
+  background: var(--danger);
+  border-color: var(--danger);
 }
 
 .match-list {
@@ -3173,9 +3461,87 @@ code {
   align-items: end;
 }
 
+.report-drawer-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(42, 38, 34, 0.08);
+  backdrop-filter: blur(1px);
+  z-index: 20;
+}
+
+.report-drawer {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0)),
+    var(--surface);
+  border-left: 1px solid var(--line-soft);
+  box-shadow: -16px 0 36px rgba(25, 19, 14, 0.12);
+}
+
+.report-drawer-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.report-drawer-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-drawer-copy h2 {
+  font-size: 20px;
+  line-height: 1.16;
+}
+
+.report-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.report-drawer-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.report-drawer-actions .secondary-btn,
+.report-drawer-actions .text-btn {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.report-hero {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.report-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-hero h2 {
+  font-size: 24px;
+  line-height: 1.18;
+}
+
 .memo-badge {
   color: var(--accent);
-  padding: 3px 8px;
   font-size: 11px;
 }
 
@@ -3192,9 +3558,7 @@ code {
 
 .report-toc button {
   padding: 8px 10px;
-  border: 1px solid var(--line-soft);
   background: var(--surface-strong);
-  cursor: pointer;
 }
 
 .report-article {
@@ -3205,9 +3569,7 @@ code {
 
 .report-section {
   padding: 14px 0;
-  border: none;
   border-top: 1px solid var(--line-soft);
-  background: transparent;
 }
 
 .report-section h3 {
@@ -3233,6 +3595,7 @@ code {
 .report-item p {
   flex: 1;
   overflow-wrap: anywhere;
+  margin: 0;
 }
 
 .report-item.paragraph {
@@ -3310,6 +3673,10 @@ code {
   margin-top: 10px;
 }
 
+.empty-action {
+  margin-top: 12px;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -3331,7 +3698,6 @@ code {
 }
 
 .dialog-panel h2 {
-  font-family: var(--font-serif);
   font-size: 26px;
 }
 
@@ -3339,34 +3705,69 @@ code {
   color: var(--text);
 }
 
-@media (max-width: 1360px) {
-  .workspace {
-    --left-width: 270px;
-    --right-width: 380px;
-  }
+.report-drawer-enter-active,
+.report-drawer-leave-active {
+  transition: opacity 180ms ease;
+}
+
+.report-drawer-enter-active .report-drawer,
+.report-drawer-leave-active .report-drawer {
+  transition:
+    transform 220ms ease,
+    opacity 220ms ease;
+}
+
+.report-drawer-enter-from,
+.report-drawer-leave-to {
+  opacity: 0;
+}
+
+.report-drawer-enter-from .report-drawer,
+.report-drawer-leave-to .report-drawer {
+  opacity: 0;
+  transform: translateX(48px);
+}
+
+.inline-detail-enter-active,
+.inline-detail-leave-active {
+  overflow: hidden;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    max-height 220ms ease;
+}
+
+.inline-detail-enter-from,
+.inline-detail-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+  max-height: 0;
+}
+
+.inline-detail-enter-to,
+.inline-detail-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+  max-height: 1600px;
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+ol,
+ul,
+dl,
+dt,
+dd,
+pre {
+  margin: 0;
 }
 
 @media (max-width: 1180px) {
-  .workspace {
-    grid-template-columns: var(--left-width) minmax(0, 1fr);
-  }
-
-  .right-rail {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(400px, 100vw);
-    z-index: 20;
-    box-shadow: -10px 0 30px rgba(25, 19, 14, 0.14);
-  }
-
-  .workspace.right-collapsed .right-rail {
-    transform: translateX(calc(100% - 74px));
-  }
-
-  .workspace:not(.right-collapsed) .right-rail {
-    transform: translateX(0);
+  .stage-shell {
+    padding-inline: 18px;
   }
 }
 
@@ -3375,14 +3776,14 @@ code {
     display: flex;
     flex-direction: column;
     height: auto;
-    min-height: auto;
+    min-height: 100vh;
     overflow: visible;
   }
 
   .left-rail,
-  .center-stage {
-    min-height: auto;
+  .stage-shell {
     height: auto;
+    min-height: 0;
   }
 
   .left-rail {
@@ -3390,23 +3791,38 @@ code {
     border-bottom: 1px solid var(--line-soft);
   }
 
-  .center-stage {
+  .stage-shell {
     overflow: visible;
   }
 
-  .right-rail {
-    height: 100vh;
-  }
-
-  .stage-header,
-  .detail-hero,
-  .report-hero {
+  .utility-bar,
+  .inline-detail-top,
+  .report-hero,
+  .report-drawer-header {
     flex-direction: column;
+    display: flex;
   }
 
-  .query-grid,
-  .session-summary-grid {
+  .query-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tool-strip {
+    align-items: stretch;
+  }
+
+  .source-pill {
+    max-width: none;
+  }
+
+  .tool-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .runtime-trigger {
+    justify-content: space-between;
   }
 
   .filter-bar {
@@ -3421,12 +3837,8 @@ code {
     width: 100%;
   }
 
-  .derive-form {
-    grid-template-columns: 1fr;
-  }
-
-  .detail-meta-line {
-    gap: 4px 8px;
+  .paper-stage {
+    min-height: 420px;
   }
 
   .paper-row {
@@ -3439,6 +3851,29 @@ code {
     align-items: center;
     opacity: 1;
     transform: none;
+  }
+
+  .inline-detail-panel {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .derive-form {
+    grid-template-columns: 1fr;
+  }
+
+  .report-drawer-shell {
+    position: fixed;
+    inset: 0;
+    padding-top: 12px;
+    z-index: 40;
+  }
+
+  .report-drawer {
+    width: 100%;
+    height: calc(100% - 12px);
+    border-left: none;
+    border-top: 1px solid var(--line-soft);
   }
 }
 </style>
