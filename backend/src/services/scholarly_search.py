@@ -1,3 +1,5 @@
+# ruff: noqa: D202,D107
+
 """Scholarly literature planning, search, and screening services."""
 
 from __future__ import annotations
@@ -9,8 +11,6 @@ import math
 import re
 import time
 import xml.etree.ElementTree as ET
-from collections import Counter
-from datetime import datetime
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -18,6 +18,11 @@ import requests
 from openai import OpenAI
 
 from config import Configuration
+from services.scholarly_contracts import (
+    WORKFLOW_METRIC_DEFAULTS,
+    default_session_metadata,
+    default_workflow_metrics,
+)
 from services.scholarly_store import normalize_title, paper_key
 
 logger = logging.getLogger(__name__)
@@ -129,6 +134,45 @@ VARIANT_SUFFIXES = {
     "recent": " recent advances 2024 2025",
     "benchmark": " benchmark evaluation",
 }
+FRONTIER_NEIGHBORS = {
+    "retrieval augmented generation": [
+        "knowledge grounding",
+        "context augmentation",
+        "retrieval systems",
+    ],
+    "representation learning": [
+        "feature learning",
+        "embedding spaces",
+        "latent representation",
+    ],
+    "embeddings": ["vector search", "dense retrieval", "semantic indexing"],
+    "retrieval": ["information retrieval", "dense retrieval", "reranking"],
+    "benchmark evaluation": ["leaderboard", "evaluation protocol", "diagnostic benchmark"],
+    "multimodal": ["vision language", "cross modal", "multimodal reasoning"],
+    "memory": ["long-term memory", "episodic memory", "persistent context"],
+    "code generation": ["coding agents", "software engineering", "program synthesis"],
+    "question answering": ["knowledge intensive qa", "fact grounding", "long-form qa"],
+}
+DIRECT_BUCKET_SHARES = {
+    "direct_core": 0.64,
+    "direct_support": 0.36,
+}
+FRONTIER_BUCKET_SHARES = {
+    "frontier_adjacent": 0.5,
+    "frontier_recent": 0.3,
+    "frontier_broader": 0.2,
+}
+QUERY_TYPE_WEIGHTS = {
+    "core": 1.0,
+    "benchmark": 0.82,
+    "recent": 0.72,
+    "survey": 0.56,
+}
+FRONTIER_EXPANSION_WEIGHTS = {
+    "adjacent": 1.0,
+    "recent": 0.78,
+    "broader": 0.58,
+}
 
 
 def tokenize(text: str) -> list[str]:
@@ -202,12 +246,468 @@ class ScholarlySearchService:
         """Recall, annotate, and de-duplicate candidate papers."""
 
         target = limit or self.config.scholarly_candidate_limit
-        per_variant = max(6, min(12, math.ceil(target / 6)))
+        retrieved = self.retrieve_candidates(
+            topic,
+            target,
+            query_tasks=query_tasks,
+            planner_notices=planner_notices,
+        )
+        return {
+            "queries": retrieved["queries"],
+            "papers": self.dedupe_and_normalize(
+                retrieved["raw_papers"],
+                limit=target,
+            ),
+            "degradation_notices": retrieved["degradation_notices"],
+            "source_statuses": retrieved["source_statuses"],
+            "skipped_sources": retrieved["skipped_sources"],
+        }
+
+    def retrieve_candidates(
+        self,
+        topic: str,
+        limit: int | None = None,
+        *,
+        query_tasks: list[dict[str, Any]] | None = None,
+        planner_notices: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Recall raw papers and source health without de-duplication."""
+
+        target = limit or self.config.scholarly_candidate_limit
         notices = list(planner_notices or [])
         if query_tasks is None:
             query_tasks, generated_notices = self.generate_query_plan(topic)
             notices.extend(generated_notices)
+        self._apply_recall_budgets(query_tasks, target)
+
         raw_papers: list[dict[str, Any]] = []
+        source_counters, source_statuses, skipped_sources = self._initial_source_tracking()
+        for task in query_tasks:
+            task_results = 0
+            variant_statuses = []
+            for variant in task.get("variants") or []:
+                variant_results = self._run_variant(
+                    task=task,
+                    variant=variant,
+                    raw_papers=raw_papers,
+                    source_counters=source_counters,
+                    source_statuses=source_statuses,
+                )
+                task_results += variant_results
+                variant_statuses.append(str(variant.get("status") or "idle"))
+            task["result_count"] = task_results
+            task["status"] = self._summarize_variant_statuses(variant_statuses)
+
+        final_statuses = self._finalize_source_statuses(source_statuses, source_counters)
+        notices.extend(self._build_source_notices(final_statuses))
+        return {
+            "queries": query_tasks,
+            "raw_papers": raw_papers,
+            "degradation_notices": unique_strings(notices),
+            "source_statuses": final_statuses,
+            "skipped_sources": skipped_sources,
+        }
+
+    def dedupe_and_normalize(
+        self,
+        papers: list[dict[str, Any]],
+        *,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Normalize recalled papers and keep the strongest recall pool."""
+
+        target = limit or self.config.scholarly_candidate_limit
+        normalized = [self._normalize_paper(item) for item in self._dedupe(papers)]
+        normalized.sort(key=self._recall_priority_key, reverse=True)
+        return normalized[:target]
+
+    def build_frontier_expansion_tasks(
+        self,
+        topic: str,
+        query_tasks: list[dict[str, Any]],
+        *,
+        max_tasks: int = 6,
+    ) -> list[dict[str, Any]]:
+        """Build conservative adjacent/broader/recent variants for sparse topics."""
+
+        frontier_tasks: list[dict[str, Any]] = []
+        seed_tasks = [
+            task
+            for task in query_tasks
+            if isinstance(task, dict) and task.get("base_terms")
+        ] or query_tasks
+
+        for task in seed_tasks[:2]:
+            base_terms = unique_strings(
+                [str(item).strip() for item in task.get("base_terms") or [] if str(item).strip()]
+            )
+            if not base_terms:
+                continue
+
+            adjacent_terms = unique_strings(base_terms[:2] + self._adjacent_terms(base_terms))
+            broader_terms = self._broader_terms(topic, base_terms)
+            frontier_tasks.append(
+                self._make_frontier_task(
+                    parent_task=task,
+                    expansion_type="adjacent",
+                    concept=f"{task.get('concept') or 'core'} adjacent",
+                    intent="Expand to adjacent concepts when direct matches are sparse.",
+                    base_terms=adjacent_terms[:4] or base_terms[:2],
+                    query_types=["core"],
+                )
+            )
+            frontier_tasks.append(
+                self._make_frontier_task(
+                    parent_task=task,
+                    expansion_type="broader",
+                    concept=f"{task.get('concept') or 'core'} broader",
+                    intent="Back off to broader literature for frontier/background evidence.",
+                    base_terms=broader_terms,
+                    query_types=["core"],
+                )
+            )
+            frontier_tasks.append(
+                self._make_frontier_task(
+                    parent_task=task,
+                    expansion_type="recent",
+                    concept=f"{task.get('concept') or 'core'} recent",
+                    intent="Check only the latest adjacent frontier signal.",
+                    base_terms=base_terms[:3],
+                    query_types=["recent"],
+                )
+            )
+            if len(frontier_tasks) >= max_tasks:
+                break
+
+        return frontier_tasks[:max_tasks]
+
+    def merge_source_statuses(self, *status_maps: dict[str, str]) -> dict[str, str]:
+        """Merge source health statuses across multiple recall passes."""
+
+        merged: dict[str, str] = {}
+        for mapping in status_maps:
+            for source_name, status in mapping.items():
+                previous = merged.get(source_name)
+                merged[source_name] = self._merge_source_status(previous, status)
+        return merged
+
+    def query_mix_summary(
+        self,
+        query_tasks: list[dict[str, Any]] | None = None,
+        frontier_query_tasks: list[dict[str, Any]] | None = None,
+    ) -> dict[str, int]:
+        """Summarize direct vs frontier query volume from task variants."""
+
+        summary = {
+            "direct_query_count": 0,
+            "direct_core_query_count": 0,
+            "frontier_query_count": 0,
+            "frontier_adjacent_query_count": 0,
+            "frontier_broader_query_count": 0,
+            "frontier_recent_query_count": 0,
+        }
+        for task in [*(query_tasks or []), *(frontier_query_tasks or [])]:
+            if not isinstance(task, dict):
+                continue
+            for variant in task.get("variants") or []:
+                if not isinstance(variant, dict):
+                    continue
+                expansion = variant.get("frontier_expansion") or task.get("frontier_expansion")
+                if expansion:
+                    summary["frontier_query_count"] += 1
+                    bucket_key = f"frontier_{str(expansion).strip().lower()}_query_count"
+                    if bucket_key in summary:
+                        summary[bucket_key] += 1
+                    continue
+                summary["direct_query_count"] += 1
+                if variant.get("query_type") == "core":
+                    summary["direct_core_query_count"] += 1
+        return summary
+
+    def source_contribution_summary(
+        self,
+        raw_papers: list[dict[str, Any]] | None = None,
+        deduped_papers: list[dict[str, Any]] | None = None,
+        ranked_papers: list[dict[str, Any]] | None = None,
+        selected_papers: list[dict[str, Any]] | None = None,
+        *,
+        source_statuses: dict[str, str] | None = None,
+        existing_summary: dict[str, Any] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Track which sources contribute to raw, shaped, and selected pools."""
+
+        summary: dict[str, dict[str, Any]] = {}
+        existing_map = existing_summary if isinstance(existing_summary, dict) else {}
+
+        for source_name, payload in existing_map.items():
+            summary[str(source_name)] = self._empty_source_contribution(
+                status=str(payload.get("status") or "idle")
+            )
+            for field in (
+                "raw_hits",
+                "deduped_hits",
+                "top_pool_hits",
+                "selected_hits",
+                "direct_top_hits",
+                "frontier_top_hits",
+            ):
+                value = payload.get(field)
+                summary[str(source_name)][field] = self._safe_int(value) or 0
+
+        known_sources = set(summary)
+        if isinstance(source_statuses, dict):
+            known_sources.update(str(item) for item in source_statuses)
+        for papers in (raw_papers, deduped_papers, ranked_papers, selected_papers):
+            for paper in papers or []:
+                known_sources.update(self._paper_sources(paper))
+        for source_name in known_sources:
+            summary.setdefault(
+                source_name,
+                self._empty_source_contribution(
+                    status=(
+                        str(source_statuses.get(source_name))
+                        if isinstance(source_statuses, dict) and source_name in source_statuses
+                        else "idle"
+                    )
+                ),
+            )
+            if isinstance(source_statuses, dict) and source_name in source_statuses:
+                summary[source_name]["status"] = str(source_statuses[source_name])
+
+        if raw_papers is not None:
+            for payload in summary.values():
+                payload["raw_hits"] = 0
+            for paper in raw_papers:
+                for source_name in self._paper_sources(paper):
+                    self._ensure_source_contribution(summary, source_name)["raw_hits"] += 1
+
+        if deduped_papers is not None:
+            for payload in summary.values():
+                payload["deduped_hits"] = 0
+            for paper in deduped_papers:
+                for source_name in self._paper_sources(paper):
+                    self._ensure_source_contribution(summary, source_name)["deduped_hits"] += 1
+
+        if ranked_papers is not None:
+            for payload in summary.values():
+                payload["top_pool_hits"] = 0
+                payload["direct_top_hits"] = 0
+                payload["frontier_top_hits"] = 0
+            for paper in ranked_papers:
+                for source_name in self._paper_sources(paper):
+                    self._ensure_source_contribution(summary, source_name)["top_pool_hits"] += 1
+                match_profile = self._paper_match_profile(paper)
+                for source_name in match_profile["direct_sources"]:
+                    self._ensure_source_contribution(summary, source_name)["direct_top_hits"] += 1
+                for source_name in match_profile["frontier_sources"]:
+                    self._ensure_source_contribution(summary, source_name)["frontier_top_hits"] += 1
+
+        if selected_papers is not None:
+            for payload in summary.values():
+                payload["selected_hits"] = 0
+            for paper in selected_papers:
+                for source_name in self._paper_sources(paper):
+                    self._ensure_source_contribution(summary, source_name)["selected_hits"] += 1
+
+        return {
+            source_name: summary[source_name]
+            for source_name in sorted(summary)
+        }
+
+    def candidate_pool_metrics(
+        self,
+        topic: str,
+        papers: list[dict[str, Any]] | None,
+        query_tasks: list[dict[str, Any]] | None = None,
+        *,
+        selected_papers: list[dict[str, Any]] | None = None,
+        limit: int = 20,
+    ) -> dict[str, int | float]:
+        """Estimate purity, drift, and direct/frontier contribution in the top pool."""
+
+        top_pool = list(papers or [])[:limit]
+        if not top_pool:
+            return {
+                "candidate_pool_purity": 0.0,
+                "candidate_drift_score": 0.0,
+                "direct_hit_coverage": 0.0,
+                "frontier_contribution_rate": 0.0,
+                "frontier_selected_count": 0,
+            }
+
+        topic_tokens = self._topic_token_set(topic, query_tasks or [])
+        direct_task_ids = self._direct_task_ids(query_tasks or [])
+        pure_count = 0
+        drift_count = 0
+        direct_hits: set[str] = set()
+        frontier_papers = 0
+
+        for paper in top_pool:
+            match_profile = self._paper_match_profile(paper)
+            topic_profile = self._paper_topic_profile(paper, topic_tokens)
+            alignment = max(
+                match_profile["query_overlap"],
+                topic_profile["topic_overlap"],
+                topic_profile["title_overlap"],
+            )
+            if (
+                match_profile["direct_hits"]
+                or match_profile["direct_core_hits"]
+                or alignment >= 0.18
+                or (
+                    match_profile["frontier_hits"]
+                    and alignment >= 0.14
+                )
+            ):
+                pure_count += 1
+            if (
+                not match_profile["direct_hits"]
+                and alignment < 0.10
+                and (match_profile["frontier_only"] or not match_profile["query_matches"])
+            ):
+                drift_count += 1
+            if match_profile["frontier_hits"]:
+                frontier_papers += 1
+            direct_hits.update(
+                item.get("subtask_id")
+                for item in match_profile["direct_core_matches"]
+                if item.get("subtask_id") in direct_task_ids
+            )
+
+        selected = (
+            list(selected_papers)
+            if selected_papers is not None
+            else [paper for paper in papers or [] if paper.get("selected")]
+        )
+        frontier_selected_count = sum(
+            1
+            for paper in selected
+            if self._paper_match_profile(paper)["frontier_hits"] > 0
+        )
+        pool_size = len(top_pool)
+        return {
+            "candidate_pool_purity": round(pure_count / pool_size, 3),
+            "candidate_drift_score": round(drift_count / pool_size, 3),
+            "direct_hit_coverage": round(
+                len(direct_hits) / max(1, len(direct_task_ids)),
+                3,
+            ),
+            "frontier_contribution_rate": round(frontier_papers / pool_size, 3),
+            "frontier_selected_count": frontier_selected_count,
+        }
+
+    def build_session_metadata(
+        self,
+        *,
+        topic: str,
+        query_tasks: list[dict[str, Any]] | None = None,
+        frontier_query_tasks: list[dict[str, Any]] | None = None,
+        raw_papers: list[dict[str, Any]] | None = None,
+        deduped_papers: list[dict[str, Any]] | None = None,
+        final_papers: list[dict[str, Any]] | None = None,
+        source_statuses: dict[str, str] | None = None,
+        skipped_sources: list[str] | None = None,
+        degradation_notices: list[str] | None = None,
+        frontier_mode: bool = False,
+        frontier_reason: str | None = None,
+        metrics: dict[str, Any] | None = None,
+        existing_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Compose stable session metadata plus retrieval quality summaries."""
+
+        existing = existing_metadata if isinstance(existing_metadata, dict) else {}
+        merged_metrics = default_workflow_metrics(existing.get("metrics"))
+        metric_overrides = metrics if isinstance(metrics, dict) else {}
+        for key in WORKFLOW_METRIC_DEFAULTS:
+            value = metric_overrides.get(key)
+            if value is not None:
+                merged_metrics[key] = value
+
+        query_mix = self.query_mix_summary(
+            query_tasks,
+            frontier_query_tasks=frontier_query_tasks,
+        )
+        merged_metrics["direct_query_count"] = query_mix["direct_query_count"]
+        merged_metrics["direct_core_query_count"] = query_mix["direct_core_query_count"]
+        if frontier_query_tasks is not None:
+            merged_metrics["frontier_query_count"] = query_mix["frontier_query_count"]
+            merged_metrics["frontier_adjacent_query_count"] = query_mix[
+                "frontier_adjacent_query_count"
+            ]
+            merged_metrics["frontier_broader_query_count"] = query_mix[
+                "frontier_broader_query_count"
+            ]
+            merged_metrics["frontier_recent_query_count"] = query_mix[
+                "frontier_recent_query_count"
+            ]
+
+        selected_papers = [
+            paper
+            for paper in final_papers or []
+            if paper.get("selected")
+        ]
+        candidate_metrics = self.candidate_pool_metrics(
+            topic,
+            final_papers or deduped_papers or [],
+            query_tasks,
+            selected_papers=selected_papers,
+        )
+        for key, value in candidate_metrics.items():
+            merged_metrics[key] = value
+
+        if raw_papers is not None:
+            merged_metrics["raw_paper_count"] = len(raw_papers)
+        if deduped_papers is not None:
+            merged_metrics["deduped_paper_count"] = len(deduped_papers)
+        if raw_papers:
+            merged_metrics["dedupe_ratio"] = round(
+                len(deduped_papers or []) / max(1, len(raw_papers)),
+                3,
+            )
+        if final_papers is not None:
+            merged_metrics["final_candidate_count"] = len(final_papers)
+            merged_metrics["selected_count"] = len(selected_papers)
+
+        source_contributions = self.source_contribution_summary(
+            raw_papers,
+            deduped_papers,
+            (final_papers or deduped_papers or [])[:20],
+            selected_papers if final_papers is not None else None,
+            source_statuses=source_statuses,
+            existing_summary=existing.get("source_contributions"),
+        )
+        return default_session_metadata(
+            {
+                **existing,
+                "source_statuses": (
+                    source_statuses
+                    if source_statuses is not None
+                    else existing.get("source_statuses") or {}
+                ),
+                "skipped_sources": (
+                    skipped_sources
+                    if skipped_sources is not None
+                    else existing.get("skipped_sources") or []
+                ),
+                "degradation_notices": (
+                    degradation_notices
+                    if degradation_notices is not None
+                    else existing.get("degradation_notices") or []
+                ),
+                "frontier_mode": frontier_mode,
+                "frontier_reason": (
+                    frontier_reason
+                    if frontier_reason is not None
+                    else existing.get("frontier_reason")
+                ),
+                "metrics": merged_metrics,
+                "source_contributions": source_contributions,
+            }
+        )
+
+    def _initial_source_tracking(
+        self,
+    ) -> tuple[dict[str, dict[str, int]], dict[str, str], list[str]]:
         source_counters = {
             "openalex": {"attempted": 0, "succeeded": 0, "failed": 0},
             "arxiv": {"attempted": 0, "succeeded": 0, "failed": 0},
@@ -222,41 +722,118 @@ class ScholarlySearchService:
         if not self.config.semantic_scholar_api_key:
             source_statuses["semantic_scholar"] = "skipped_missing_api_key"
             skipped_sources.append("semantic_scholar")
+        return source_counters, source_statuses, skipped_sources
+
+    def _apply_recall_budgets(
+        self,
+        query_tasks: list[dict[str, Any]],
+        target: int,
+    ) -> None:
+        """Assign per-variant recall budgets for direct vs frontier passes."""
+
+        if not query_tasks:
+            return
+
+        frontier_mode = any(task.get("frontier_expansion") for task in query_tasks)
+        bucket_shares = (
+            FRONTIER_BUCKET_SHARES if frontier_mode else DIRECT_BUCKET_SHARES
+        )
+        bucket_variants: dict[str, list[dict[str, Any]]] = {}
 
         for task in query_tasks:
-            task_results = 0
-            variant_statuses = []
-            for variant in task.get("variants") or []:
-                variant_results = self._run_variant(
-                    task=task,
-                    variant=variant,
-                    per_variant=per_variant,
-                    raw_papers=raw_papers,
-                    source_counters=source_counters,
-                    source_statuses=source_statuses,
+            if not isinstance(task, dict):
+                continue
+            task_bucket = self._task_recall_bucket(task)
+            task["recall_bucket"] = task_bucket
+            task_variants = [
+                variant
+                for variant in task.get("variants") or []
+                if isinstance(variant, dict)
+            ]
+            for variant in task_variants:
+                bucket = self._variant_recall_bucket(task, variant)
+                variant["recall_bucket"] = bucket
+                variant["recall_priority"] = round(
+                    self._variant_recall_priority(task, variant),
+                    3,
                 )
-                task_results += variant_results
-                variant_statuses.append(str(variant.get("status") or "idle"))
-            task["result_count"] = task_results
-            task["status"] = self._summarize_variant_statuses(variant_statuses)
+                bucket_variants.setdefault(bucket, []).append(variant)
 
-        deduped = self._dedupe(raw_papers)
-        final_statuses = self._finalize_source_statuses(source_statuses, source_counters)
-        notices.extend(self._build_source_notices(final_statuses))
-        return {
-            "queries": query_tasks,
-            "papers": deduped[:target],
-            "degradation_notices": unique_strings(notices),
-            "source_statuses": final_statuses,
-            "skipped_sources": skipped_sources,
+        min_total_budget = max(12, len([v for values in bucket_variants.values() for v in values]) * 3)
+        total_budget = max(target, min_total_budget)
+        for bucket_name, variants in bucket_variants.items():
+            share = bucket_shares.get(
+                bucket_name,
+                1 / max(1, len(bucket_variants)),
+            )
+            bucket_budget = max(len(variants) * 3, math.ceil(total_budget * share))
+            total_weight = sum(
+                float(variant.get("recall_priority") or 0.0)
+                for variant in variants
+            )
+            for variant in variants:
+                priority = float(variant.get("recall_priority") or 0.0)
+                proportional = bucket_budget * (
+                    priority / max(total_weight, 1e-6)
+                )
+                variant["result_budget"] = max(3, min(14, math.ceil(proportional)))
+
+        for task in query_tasks:
+            variants = [
+                variant
+                for variant in task.get("variants") or []
+                if isinstance(variant, dict)
+            ]
+            task["result_budget"] = sum(
+                self._safe_int(variant.get("result_budget")) or 0
+                for variant in variants
+            )
+
+    @staticmethod
+    def _task_recall_bucket(task: dict[str, Any]) -> str:
+        expansion = str(task.get("frontier_expansion") or "").strip().lower()
+        if expansion:
+            return f"frontier_{expansion}"
+        query_types = {
+            str(item).strip().lower()
+            for item in task.get("query_types") or []
+            if str(item).strip()
         }
+        return "direct_core" if "core" in query_types else "direct_support"
+
+    def _variant_recall_bucket(
+        self,
+        task: dict[str, Any],
+        variant: dict[str, Any],
+    ) -> str:
+        expansion = str(
+            variant.get("frontier_expansion") or task.get("frontier_expansion") or ""
+        ).strip().lower()
+        if expansion:
+            return f"frontier_{expansion}"
+        return "direct_core" if variant.get("query_type") == "core" else "direct_support"
+
+    def _variant_recall_priority(
+        self,
+        task: dict[str, Any],
+        variant: dict[str, Any],
+    ) -> float:
+        query_type = str(variant.get("query_type") or "core").strip().lower()
+        expansion = str(
+            variant.get("frontier_expansion") or task.get("frontier_expansion") or ""
+        ).strip().lower()
+        priority = QUERY_TYPE_WEIGHTS.get(query_type, 0.6)
+        if expansion:
+            priority *= FRONTIER_EXPANSION_WEIGHTS.get(expansion, 0.6)
+        if task.get("parent_subtask_id"):
+            priority *= 0.95
+        return priority
 
     def _run_variant(
         self,
         *,
         task: dict[str, Any],
         variant: dict[str, Any],
-        per_variant: int,
         raw_papers: list[dict[str, Any]],
         source_counters: dict[str, dict[str, int]],
         source_statuses: dict[str, str],
@@ -282,7 +859,8 @@ class ScholarlySearchService:
 
             source_counters[source_name]["attempted"] += 1
             variant["sources_attempted"].append(source_name)
-            results, error = self._search_source(source_name, query_text, per_variant)
+            variant_budget = self._safe_int(variant.get("result_budget")) or 4
+            results, error = self._search_source(source_name, query_text, variant_budget)
             if error is not None:
                 source_counters[source_name]["failed"] += 1
                 variant["sources_failed"].append(
@@ -301,6 +879,11 @@ class ScholarlySearchService:
                         "query_type": variant["query_type"],
                         "query_text": query_text,
                         "source": source_name,
+                        "frontier_expansion": (
+                            variant.get("frontier_expansion")
+                            or task.get("frontier_expansion")
+                        ),
+                        "parent_subtask_id": task.get("parent_subtask_id"),
                     }
                 )
             raw_papers.extend(results)
@@ -725,7 +1308,12 @@ class ScholarlySearchService:
                     "query_type": query_type,
                     "query_text": query_text,
                     "result_count": 0,
+                    "result_budget": 0,
                     "status": "pending",
+                    "recall_bucket": "direct_core" if query_type == "core" else "direct_support",
+                    "recall_priority": 0.0,
+                    "frontier_expansion": None,
+                    "parent_subtask_id": None,
                 }
             )
         return {
@@ -736,7 +1324,11 @@ class ScholarlySearchService:
             "query_types": query_types,
             "variants": variants,
             "result_count": 0,
+            "result_budget": 0,
             "status": "pending",
+            "recall_bucket": "direct_core" if "core" in query_types else "direct_support",
+            "frontier_expansion": None,
+            "parent_subtask_id": None,
         }
 
     @staticmethod
@@ -749,6 +1341,49 @@ class ScholarlySearchService:
             if text in VARIANT_SUFFIXES and text not in normalized:
                 normalized.append(text)
         return normalized or ["core", "recent"]
+
+    def _make_frontier_task(
+        self,
+        *,
+        parent_task: dict[str, Any],
+        expansion_type: str,
+        concept: str,
+        intent: str,
+        base_terms: list[str],
+        query_types: list[str],
+    ) -> dict[str, Any]:
+        task = self._make_query_task(
+            subtask_id=f"{parent_task.get('subtask_id')}_{expansion_type}",
+            concept=concept,
+            intent=intent,
+            base_terms=base_terms,
+            query_types=query_types,
+        )
+        task["frontier_expansion"] = expansion_type
+        task["parent_subtask_id"] = parent_task.get("subtask_id")
+        task["recall_bucket"] = f"frontier_{expansion_type}"
+        for variant in task["variants"]:
+            variant["frontier_expansion"] = expansion_type
+            variant["parent_subtask_id"] = parent_task.get("subtask_id")
+            variant["recall_bucket"] = f"frontier_{expansion_type}"
+        return task
+
+    def _adjacent_terms(self, base_terms: list[str]) -> list[str]:
+        joined = " ".join(base_terms).lower()
+        candidates: list[str] = []
+        for canonical, neighbors in FRONTIER_NEIGHBORS.items():
+            if canonical in joined:
+                candidates.extend(neighbors)
+        if not candidates:
+            candidates.extend(base_terms[1:3])
+        if not candidates:
+            candidates.append("related methods")
+        return unique_strings(candidates)[:3]
+
+    def _broader_terms(self, topic: str, base_terms: list[str]) -> list[str]:
+        topic_terms = unique_strings(tokenize(topic))
+        broader = [*base_terms[:2], *topic_terms[:2], "survey", "review"]
+        return unique_strings(broader)[:4]
 
     def _build_arxiv_query(self, query: str) -> str:
         tokens = query.split()
@@ -779,6 +1414,51 @@ class ScholarlySearchService:
                 continue
             merged[key] = self._merge_paper(merged[key], paper)
         return list(merged.values())
+
+    def _normalize_paper(self, paper: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(paper)
+        normalized["title"] = str(normalized.get("title") or "Untitled").strip()
+        normalized["abstract"] = re.sub(r"\s+", " ", str(normalized.get("abstract") or "")).strip()
+        normalized["authors"] = [
+            str(author).strip()
+            for author in normalized.get("authors") or []
+            if str(author).strip()
+        ]
+        normalized["year"] = self._safe_int(normalized.get("year"))
+        normalized["citation_count"] = self._safe_int(normalized.get("citation_count")) or 0
+        normalized["query_matches"] = self._merge_query_matches(
+            normalized.get("query_matches") or [],
+            [],
+        )
+        sources = {
+            item.strip()
+            for item in str(normalized.get("source") or "unknown").split("+")
+            if item.strip()
+        }
+        normalized["source"] = "+".join(sorted(sources)) or "unknown"
+        return normalized
+
+    def _recall_priority_key(self, paper: dict[str, Any]) -> tuple[float, ...]:
+        match_profile = self._paper_match_profile(paper)
+        citation_signal = math.log10((paper.get("citation_count") or 0) + 1)
+        year = paper.get("year") or 0
+        source_count = len(
+            [item for item in str(paper.get("source") or "").split("+") if item]
+        )
+        return (
+            match_profile["direct_core_hits"],
+            match_profile["direct_hits"],
+            match_profile["query_overlap"],
+            match_profile["title_query_overlap"],
+            1 if not match_profile["frontier_only"] else 0,
+            0 if match_profile["drift_flag"] else 1,
+            match_profile["unique_subtasks"],
+            match_profile["unique_sources"],
+            source_count,
+            match_profile["frontier_hits"],
+            citation_signal,
+            year,
+        )
 
     def _merge_paper(self, left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
         result = dict(left)
@@ -813,6 +1493,208 @@ class ScholarlySearchService:
         )
         return result
 
+    def _merge_source_status(self, left: str | None, right: str | None) -> str:
+        if not left:
+            return right or "idle"
+        if not right:
+            return left
+        if left == right:
+            return left
+        if left.startswith("skipped") and right.startswith("skipped"):
+            return left
+        if left.startswith("skipped"):
+            return right if right in {"ok", "partial_failure"} else "partial_failure"
+        if right.startswith("skipped"):
+            return left if left in {"ok", "partial_failure"} else "partial_failure"
+        pair = {left, right}
+        if "partial_failure" in pair:
+            return "partial_failure"
+        if pair == {"ok", "failed"}:
+            return "partial_failure"
+        if "ok" in pair:
+            return "ok"
+        if "failed" in pair:
+            return "failed"
+        if "idle" in pair:
+            return right if left == "idle" else left
+        return right
+
+    @staticmethod
+    def _empty_source_contribution(*, status: str = "idle") -> dict[str, Any]:
+        return {
+            "status": status,
+            "raw_hits": 0,
+            "deduped_hits": 0,
+            "top_pool_hits": 0,
+            "selected_hits": 0,
+            "direct_top_hits": 0,
+            "frontier_top_hits": 0,
+        }
+
+    def _ensure_source_contribution(
+        self,
+        summary: dict[str, dict[str, Any]],
+        source_name: str,
+    ) -> dict[str, Any]:
+        summary.setdefault(source_name, self._empty_source_contribution())
+        return summary[source_name]
+
+    @staticmethod
+    def _paper_sources(paper: dict[str, Any]) -> set[str]:
+        sources = {
+            item.strip()
+            for item in str(paper.get("source") or "").split("+")
+            if item.strip()
+        }
+        for match in paper.get("query_matches") or []:
+            source_name = str(match.get("source") or "").strip()
+            if source_name:
+                sources.add(source_name)
+        return sources
+
+    @staticmethod
+    def _direct_task_ids(query_tasks: list[dict[str, Any]]) -> set[str]:
+        return {
+            str(task.get("subtask_id"))
+            for task in query_tasks
+            if isinstance(task, dict)
+            and task.get("subtask_id")
+            and not task.get("frontier_expansion")
+            and (
+                "core" in (task.get("query_types") or [])
+                or any(
+                    variant.get("query_type") == "core"
+                    for variant in task.get("variants") or []
+                    if isinstance(variant, dict)
+                )
+            )
+        }
+
+    def _topic_token_set(
+        self,
+        topic: str,
+        query_tasks: list[dict[str, Any]],
+    ) -> set[str]:
+        tokens = tokenize(topic)
+        for task in query_tasks:
+            if not isinstance(task, dict) or task.get("frontier_expansion"):
+                continue
+            tokens.extend(
+                tokenize(" ".join(str(item) for item in task.get("base_terms") or []))
+            )
+        return set(tokens)
+
+    @staticmethod
+    def _paper_topic_profile(
+        paper: dict[str, Any],
+        topic_tokens: set[str],
+    ) -> dict[str, float]:
+        title_tokens = set(tokenize(str(paper.get("title") or "")))
+        paper_tokens = set(
+            tokenize(
+                f"{paper.get('title') or ''} {paper.get('abstract') or ''}"
+            )
+        )
+        if not topic_tokens:
+            return {
+                "topic_overlap": 0.0,
+                "title_overlap": 0.0,
+            }
+        return {
+            "topic_overlap": len(paper_tokens & topic_tokens) / max(1, len(topic_tokens)),
+            "title_overlap": len(title_tokens & topic_tokens) / max(1, len(topic_tokens)),
+        }
+
+    def _paper_match_profile(self, paper: dict[str, Any]) -> dict[str, Any]:
+        query_matches = self._merge_query_matches(paper.get("query_matches") or [], [])
+        paper_tokens = set(
+            tokenize(
+                f"{paper.get('title') or ''} {paper.get('abstract') or ''}"
+            )
+        )
+        title_tokens = set(tokenize(str(paper.get("title") or "")))
+        query_tokens = set(
+            tokenize(
+                " ".join(
+                    " ".join(
+                        part
+                        for part in (
+                            str(match.get("query_text") or "").strip(),
+                            str(match.get("concept") or "").strip(),
+                        )
+                        if part
+                    )
+                    for match in query_matches
+                )
+            )
+        )
+        direct_matches = [
+            match
+            for match in query_matches
+            if not match.get("frontier_expansion")
+        ]
+        direct_core_matches = [
+            match
+            for match in direct_matches
+            if match.get("query_type") == "core"
+        ]
+        frontier_matches = [
+            match
+            for match in query_matches
+            if match.get("frontier_expansion")
+        ]
+        direct_sources = {
+            str(match.get("source")).strip()
+            for match in direct_matches
+            if str(match.get("source") or "").strip()
+        }
+        frontier_sources = {
+            str(match.get("source")).strip()
+            for match in frontier_matches
+            if str(match.get("source") or "").strip()
+        }
+        query_overlap = (
+            len(paper_tokens & query_tokens) / max(1, len(query_tokens))
+            if query_tokens
+            else 0.0
+        )
+        title_query_overlap = (
+            len(title_tokens & query_tokens) / max(1, len(query_tokens))
+            if query_tokens
+            else 0.0
+        )
+        frontier_only = bool(frontier_matches) and not direct_matches
+        drift_flag = (
+            frontier_only
+            and query_overlap < 0.10
+            and title_query_overlap < 0.06
+        ) or (not query_matches)
+        return {
+            "query_matches": query_matches,
+            "direct_matches": direct_matches,
+            "direct_core_matches": direct_core_matches,
+            "frontier_matches": frontier_matches,
+            "direct_hits": len(direct_matches),
+            "direct_core_hits": len(direct_core_matches),
+            "frontier_hits": len(frontier_matches),
+            "frontier_only": frontier_only,
+            "direct_sources": direct_sources,
+            "frontier_sources": frontier_sources,
+            "query_overlap": round(query_overlap, 3),
+            "title_query_overlap": round(title_query_overlap, 3),
+            "unique_subtasks": len(
+                {
+                    str(item.get("subtask_id"))
+                    for item in query_matches
+                    if item.get("subtask_id")
+                }
+            ),
+            "unique_sources": len(
+                {str(item.get("source")) for item in query_matches if item.get("source")}
+            ),
+            "drift_flag": drift_flag,
+        }
+
     @staticmethod
     def _merge_query_matches(
         left: list[dict[str, Any]],
@@ -823,12 +1705,24 @@ class ScholarlySearchService:
         for item in left + right:
             if not isinstance(item, dict):
                 continue
-            key = json.dumps(item, ensure_ascii=False, sort_keys=True)
+            normalized = ScholarlySearchService._normalize_query_match(item)
+            key = json.dumps(normalized, ensure_ascii=False, sort_keys=True)
             if key in seen:
                 continue
             seen.add(key)
-            merged.append(item)
+            merged.append(normalized)
         return merged
+
+    @staticmethod
+    def _normalize_query_match(item: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(item)
+        for key in ("subtask_id", "concept", "intent", "query_type", "query_text", "source"):
+            value = normalized.get(key)
+            normalized[key] = str(value).strip() if value is not None else ""
+        for key in ("frontier_expansion", "parent_subtask_id"):
+            value = normalized.get(key)
+            normalized[key] = str(value).strip() if value not in {None, ""} else None
+        return normalized
 
     def _finalize_source_statuses(
         self,
@@ -942,191 +1836,11 @@ class ScholarlySearchService:
                 words.append((position, word))
         return " ".join(word for _, word in sorted(words))
 
-
-class ScholarlyScreeningService:
-    """Rank recalled papers and select a compact review set."""
-
-    def __init__(self, config: Configuration) -> None:
-        self.config = config
-        self.current_year = datetime.now().year
-
-    def screen(
-        self,
-        topic: str,
-        papers: list[dict[str, Any]],
-        query_tasks: list[dict[str, Any]] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Score papers with transparent relevance and frontier heuristics."""
-
-        query_tasks = query_tasks or []
-        topic_tokens = Counter(
-            tokenize(
-                " ".join(
-                    [
-                        topic,
-                        *[
-                            " ".join(task.get("base_terms") or [])
-                            for task in query_tasks
-                        ],
-                    ]
-                )
-            )
-        )
-        scored: list[dict[str, Any]] = []
-        for paper in papers:
-            title = str(paper.get("title") or "")
-            abstract = str(paper.get("abstract") or "")
-            combined_tokens = Counter(tokenize(f"{title} {abstract}"))
-            overlap = sum(
-                min(count, combined_tokens[token])
-                for token, count in topic_tokens.items()
-            )
-            relevance = overlap / max(1, len(topic_tokens))
-            title_tokens = tokenize(title)
-            title_overlap = sum(
-                1 for token in topic_tokens if token in title_tokens
-            )
-            relevance += min(0.22, title_overlap * 0.04)
-
-            query_matches = paper.get("query_matches") or []
-            query_bonus = self._query_match_bonus(query_matches)
-            year = paper.get("year")
-            novelty = self._novelty_score(year)
-            citation = min(
-                0.12,
-                math.log10((paper.get("citation_count") or 0) + 1) / 12,
-            )
-            final = min(
-                1.0,
-                relevance * 0.72 + query_bonus + novelty * 0.10 + citation,
-            )
-
-            label = self._label(relevance, final)
-            tags = self._tags(paper, relevance, novelty, query_matches)
-            reason = self._reason(paper, relevance, novelty, label, query_matches)
-            item = dict(paper)
-            item.update(
-                {
-                    "relevance_score": round(relevance, 3),
-                    "novelty_score": round(novelty, 3),
-                    "final_score": round(final, 3),
-                    "relevance_label": label,
-                    "ai_reason": reason,
-                    "tags": tags,
-                }
-            )
-            scored.append(item)
-
-        scored.sort(
-            key=lambda item: (item["final_score"], item.get("year") or 0),
-            reverse=True,
-        )
-        selected_limit = self.config.scholarly_selection_limit
-        strict = [
-            item
-            for item in scored
-            if item["relevance_label"] in {"must_read", "frontier"}
-        ]
-        if len(strict) >= selected_limit:
-            selected_keys = {paper_key(item) for item in strict[:selected_limit]}
-        else:
-            selected_keys = {paper_key(item) for item in scored[:selected_limit]}
-
-        for rank, item in enumerate(scored, start=1):
-            item["rank"] = rank
-            item["selected"] = paper_key(item) in selected_keys
-            item["user_status"] = "included" if item["selected"] else "candidate"
-            if item["selected"] and item["relevance_label"] == "candidate":
-                item["relevance_label"] = "adjacent"
-                item["tags"] = sorted(set(item["tags"] + ["旁支补充"]))
-        return scored
-
-    def _query_match_bonus(self, query_matches: list[dict[str, Any]]) -> float:
-        if not query_matches:
-            return 0.0
-        unique_subtasks = len(
-            {str(item.get("subtask_id")) for item in query_matches if item.get("subtask_id")}
-        )
-        unique_sources = len(
-            {str(item.get("source")) for item in query_matches if item.get("source")}
-        )
-        core_hits = sum(
-            1 for item in query_matches if item.get("query_type") == "core"
-        )
-        return min(
-            0.24,
-            unique_subtasks * 0.04 + unique_sources * 0.03 + core_hits * 0.02,
-        )
-
-    def _novelty_score(self, year: Any) -> float:
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
         try:
-            value = int(year)
+            if value is None or value == "":
+                return None
+            return int(value)
         except (TypeError, ValueError):
-            return 0.18
-        age = max(0, self.current_year - value)
-        if age <= 1:
-            return 1.0
-        if age <= 3:
-            return 0.76
-        if age <= 5:
-            return 0.52
-        if age <= 10:
-            return 0.28
-        return 0.16
-
-    @staticmethod
-    def _label(relevance: float, final: float) -> str:
-        if relevance >= 0.50 and final >= 0.58:
-            return "must_read"
-        if relevance >= 0.30 or final >= 0.46:
-            return "frontier"
-        if relevance >= 0.18:
-            return "background"
-        return "candidate"
-
-    def _tags(
-        self,
-        paper: dict[str, Any],
-        relevance: float,
-        novelty: float,
-        query_matches: list[dict[str, Any]],
-    ) -> list[str]:
-        tags: list[str] = []
-        if relevance >= 0.45:
-            tags.append("高相关")
-        if novelty >= 0.75:
-            tags.append("前沿")
-        if (paper.get("citation_count") or 0) >= 100:
-            tags.append("高被引")
-        if "arxiv" in str(paper.get("source") or ""):
-            tags.append("预印本")
-        concepts = unique_strings(
-            [str(item.get("concept") or "") for item in query_matches]
-        )
-        tags.extend(concepts[:2])
-        return unique_strings(tags or ["候选"])
-
-    @staticmethod
-    def _reason(
-        paper: dict[str, Any],
-        relevance: float,
-        novelty: float,
-        label: str,
-        query_matches: list[dict[str, Any]],
-    ) -> str:
-        title = str(paper.get("title") or "该论文")
-        year = paper.get("year") or "未知年份"
-        concepts = unique_strings(
-            [str(item.get("concept") or "") for item in query_matches]
-        )
-        concept_text = f"命中子任务：{', '.join(concepts[:2])}。" if concepts else ""
-        label_text = {
-            "must_read": "与问题高度贴合，可作为核心阅读对象。",
-            "frontier": "与主题相关且有较强的新近性信号。",
-            "background": "适合作为背景或技术脉络补充。",
-            "candidate": "直接相关性有限，暂作为候选材料。",
-        }.get(label, "可作为候选材料。")
-        return (
-            f"{title}（{year}）{label_text}{concept_text}"
-            f"相关性={relevance:.2f}，前沿性={novelty:.2f}。"
-        )
+            return None

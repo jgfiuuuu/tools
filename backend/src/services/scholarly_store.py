@@ -6,9 +6,12 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from services.scholarly_contracts import default_session_metadata
 
 
 def utc_now() -> str:
@@ -65,7 +68,7 @@ class ScholarlyStore:
         return conn
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS research_sessions (
@@ -141,14 +144,15 @@ class ScholarlyStore:
     def create_session(self, topic: str, parent_session_id: str | None = None) -> dict[str, Any]:
         session_id = make_id("ses")
         now = utc_now()
-        with self._connect() as conn:
+        metadata = json.dumps(default_session_metadata(), ensure_ascii=False)
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 INSERT INTO research_sessions
                     (id, topic, status, queries_json, metadata_json, parent_session_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, topic, "created", "[]", "{}", parent_session_id, now, now),
+                (session_id, topic, "created", "[]", metadata, parent_session_id, now, now),
             )
         return self.get_session(session_id)
 
@@ -170,16 +174,18 @@ class ScholarlyStore:
             values.append(json.dumps(queries, ensure_ascii=False))
         if metadata is not None:
             parts.append("metadata_json = ?")
-            values.append(json.dumps(metadata, ensure_ascii=False))
+            values.append(
+                json.dumps(default_session_metadata(metadata), ensure_ascii=False)
+            )
         values.append(session_id)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 f"UPDATE research_sessions SET {', '.join(parts)} WHERE id = ?",
                 values,
             )
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT s.*,
@@ -193,7 +199,7 @@ class ScholarlyStore:
         return [self._session_row_to_dict(row) for row in rows]
 
     def get_session(self, session_id: str) -> dict[str, Any]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 """
                 SELECT s.*,
@@ -217,7 +223,7 @@ class ScholarlyStore:
 
     def delete_session(self, session_id: str) -> None:
         self.get_session(session_id)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute("DELETE FROM research_sessions WHERE id = ?", (session_id,))
 
     def upsert_session_papers(
@@ -228,7 +234,7 @@ class ScholarlyStore:
         clear_existing: bool = False,
     ) -> None:
         now = utc_now()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             if clear_existing:
                 conn.execute("DELETE FROM session_papers WHERE session_id = ?", (session_id,))
 
@@ -329,7 +335,7 @@ class ScholarlyStore:
                 )
 
     def list_session_papers(self, session_id: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT p.*, sp.rank, sp.selected, sp.relevance_score, sp.novelty_score,
@@ -365,7 +371,7 @@ class ScholarlyStore:
             parts.append("tags_json = ?")
             values.append(json.dumps(tags, ensure_ascii=False))
         values.extend([session_id, paper_id])
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 f"""
                 UPDATE session_papers
@@ -385,7 +391,7 @@ class ScholarlyStore:
     def create_report(self, session_id: str, content_markdown: str) -> dict[str, Any]:
         report_id = make_id("rep")
         now = utc_now()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 "INSERT INTO reports (id, session_id, content_markdown, created_at) VALUES (?, ?, ?, ?)",
                 (report_id, session_id, content_markdown, now),
@@ -397,7 +403,7 @@ class ScholarlyStore:
         return {"id": report_id, "session_id": session_id, "content_markdown": content_markdown, "created_at": now}
 
     def list_reports(self, session_id: str) -> list[dict[str, Any]]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 "SELECT * FROM reports WHERE session_id = ? ORDER BY created_at DESC",
                 (session_id,),
@@ -414,15 +420,19 @@ class ScholarlyStore:
 
     def _session_row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         metadata = json.loads(row["metadata_json"] or "{}")
+        metadata = default_session_metadata(metadata if isinstance(metadata, dict) else {})
         return {
             "id": row["id"],
             "topic": row["topic"],
             "status": row["status"],
             "queries": json.loads(row["queries_json"] or "[]"),
             "metadata": metadata,
-            "source_statuses": metadata.get("source_statuses", {}),
-            "skipped_sources": metadata.get("skipped_sources", []),
-            "degradation_notices": metadata.get("degradation_notices", []),
+            "source_statuses": metadata["source_statuses"],
+            "skipped_sources": metadata["skipped_sources"],
+            "degradation_notices": metadata["degradation_notices"],
+            "frontier_mode": bool(metadata["frontier_mode"]),
+            "frontier_reason": metadata["frontier_reason"],
+            "metrics": metadata["metrics"],
             "parent_session_id": row["parent_session_id"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],

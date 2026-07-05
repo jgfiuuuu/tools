@@ -1,3 +1,5 @@
+# ruff: noqa: D102,D107,D202
+
 """High-level scholarly research session workflow."""
 
 from __future__ import annotations
@@ -7,25 +9,42 @@ from collections.abc import Iterator
 from typing import Any
 
 from config import Configuration
-from services.scholarly_search import ScholarlyScreeningService, ScholarlySearchService
+from services.scholarly_contracts import default_workflow_metrics
+from services.scholarly_graph import ScholarlyWorkflowGraph
+from services.scholarly_rerank import ScholarlyScreeningService
+from services.scholarly_search import ScholarlySearchService
 from services.scholarly_store import ScholarlyStore
 
 
 class ScholarlyResearchService:
     """Coordinate scholarly recall, screening, reporting, and exports."""
 
-    def __init__(self, config: Configuration) -> None:
+    def __init__(
+        self,
+        config: Configuration,
+        *,
+        store: ScholarlyStore | None = None,
+        search: ScholarlySearchService | None = None,
+        screening: ScholarlyScreeningService | None = None,
+    ) -> None:
         self.config = config
-        self.store = ScholarlyStore(config.scholarly_db_path)
-        self.search = ScholarlySearchService(config)
-        self.screening = ScholarlyScreeningService(config)
+        self.store = store or ScholarlyStore(config.scholarly_db_path)
+        self.search = search or ScholarlySearchService(config)
+        self.screening = screening or ScholarlyScreeningService(config)
+        self.graph = ScholarlyWorkflowGraph(
+            config,
+            self.store,
+            self.search,
+            self.screening,
+        )
 
     def create_session(self, topic: str, parent_session_id: str | None = None) -> dict[str, Any]:
         """Create a session and run the full recall/screening pipeline."""
 
-        session = self.store.create_session(topic, parent_session_id=parent_session_id)
-        self._recall_and_screen(session["id"], topic)
-        return self.store.get_session_detail(session["id"])
+        state = self.graph.invoke(topic, parent_session_id=parent_session_id)
+        if state.get("error"):
+            raise RuntimeError(str(state["error"]))
+        return self.store.get_session_detail(state["session_id"])
 
     def create_session_stream(
         self,
@@ -34,90 +53,16 @@ class ScholarlyResearchService:
     ) -> Iterator[dict[str, Any]]:
         """Stream session creation progress events."""
 
-        session = self.store.create_session(topic, parent_session_id=parent_session_id)
-        yield {"type": "session_created", "session": session}
         try:
-            self.store.update_session(session["id"], status="searching")
-            query_tasks, planner_notices = self.search.generate_query_plan(topic)
-            self.store.update_session(
-                session["id"],
-                queries=query_tasks,
-                metadata={
-                    "source_statuses": {},
-                    "skipped_sources": [],
-                    "degradation_notices": planner_notices,
-                },
-            )
-            yield {
-                "type": "query_plan_generated",
-                "session_id": session["id"],
-                "queries": query_tasks,
-            }
-            yield {
-                "type": "query_generated",
-                "session_id": session["id"],
-                "queries": query_tasks,
-            }
-
-            recall_result = self.search.recall(
-                topic,
-                self.config.scholarly_candidate_limit,
-                query_tasks=query_tasks,
-                planner_notices=planner_notices,
-            )
-            papers = recall_result["papers"]
-            metadata = {
-                "source_statuses": recall_result["source_statuses"],
-                "skipped_sources": recall_result["skipped_sources"],
-                "degradation_notices": recall_result["degradation_notices"],
-            }
-            self.store.update_session(
-                session["id"],
-                queries=recall_result["queries"],
-                metadata=metadata,
-            )
-            for source_name, status in metadata["source_statuses"].items():
-                if status.startswith("skipped"):
-                    yield {
-                        "type": "source_skipped",
-                        "session_id": session["id"],
-                        "source": source_name,
-                        "reason": status,
-                    }
-                elif status in {"failed", "partial_failure"}:
-                    yield {
-                        "type": "source_failed",
-                        "session_id": session["id"],
-                        "source": source_name,
-                        "reason": status,
-                    }
-            for task in recall_result["queries"]:
-                yield {
-                    "type": "subtask_completed",
-                    "session_id": session["id"],
-                    "subtask": task,
-                }
-            for notice in recall_result["degradation_notices"]:
-                yield {"type": "status", "session_id": session["id"], "message": notice}
-            yield {
-                "type": "papers_recalled",
-                "session_id": session["id"],
-                "count": len(papers),
-            }
-
-            self.store.update_session(session["id"], status="screening")
-            screened = self.screening.screen(topic, papers, recall_result["queries"])
-            self.store.upsert_session_papers(session["id"], screened, clear_existing=True)
-            for paper in screened[: self.config.scholarly_selection_limit]:
-                yield {"type": "paper_ranked", "session_id": session["id"], "paper": self._compact_paper_event(paper)}
-            self.store.update_session(session["id"], status="ready")
-            yield {
-                "type": "screening_done",
-                "session": self.store.get_session_detail(session["id"]),
-            }
+            for update in self.graph.stream(topic, parent_session_id=parent_session_id):
+                if not isinstance(update, dict) or not update:
+                    continue
+                _, payload = next(iter(update.items()))
+                if not isinstance(payload, dict):
+                    continue
+                yield from payload.get("events") or []
         except Exception as exc:
-            self.store.update_session(session["id"], status="error")
-            yield {"type": "error", "session_id": session["id"], "detail": str(exc)}
+            yield {"type": "error", "detail": str(exc)}
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return self.store.list_sessions()
@@ -130,10 +75,65 @@ class ScholarlyResearchService:
 
     def rescreen_session(self, session_id: str) -> dict[str, Any]:
         detail = self.store.get_session_detail(session_id)
+        query_tasks = detail.get("queries") or []
         papers = detail["papers"]
-        screened = self.screening.screen(detail["topic"], papers, detail.get("queries"))
+        coarse_ranked = self.screening.coarse_rerank(
+            detail["topic"],
+            papers,
+            query_tasks,
+            limit=self.config.scholarly_candidate_limit,
+        )
+        decision = self.screening.frontier_decision(
+            detail["topic"],
+            coarse_ranked,
+            query_tasks,
+        )
+        screened = self.screening.finalize_rerank(
+            detail["topic"],
+            coarse_ranked,
+            query_tasks,
+            limit=self.config.scholarly_candidate_limit,
+        )
+        selected = [
+            paper
+            for paper in screened
+            if paper.get("selected")
+        ][: self.config.scholarly_selection_limit]
+        existing_metadata = detail.get("metadata") or {}
+        metrics = default_workflow_metrics(existing_metadata.get("metrics"))
+        metrics.update(
+            {
+                **decision["metrics"],
+                "coarse_candidate_count": len(coarse_ranked),
+                "final_candidate_count": len(screened),
+                "selected_count": len(selected),
+            }
+        )
+        frontier_mode = existing_metadata.get("frontier_mode")
+        frontier_reason = existing_metadata.get("frontier_reason")
+        metadata = self.search.build_session_metadata(
+            topic=detail["topic"],
+            query_tasks=query_tasks,
+            final_papers=screened,
+            source_statuses=detail.get("source_statuses") or {},
+            skipped_sources=detail.get("skipped_sources") or [],
+            degradation_notices=detail.get("degradation_notices") or [],
+            frontier_mode=(
+                bool(frontier_mode)
+                if frontier_mode is not None
+                else bool(decision["frontier_mode"])
+            ),
+            frontier_reason=frontier_reason or decision["frontier_reason"],
+            metrics=metrics,
+            existing_metadata=existing_metadata,
+        )
         self.store.upsert_session_papers(session_id, screened, clear_existing=True)
-        self.store.update_session(session_id, status="ready")
+        self.store.update_session(
+            session_id,
+            status="ready",
+            queries=query_tasks,
+            metadata=metadata,
+        )
         return self.store.get_session_detail(session_id)
 
     def update_paper(
@@ -188,33 +188,6 @@ class ScholarlyResearchService:
         detail = self.store.get_session_detail(session_id)
         entries = [self._bibtex_entry(paper) for paper in self._included_papers(detail["papers"])]
         return "\n\n".join(entry for entry in entries if entry).strip() + "\n"
-
-    def _recall_and_screen(self, session_id: str, topic: str) -> None:
-        self.store.update_session(session_id, status="searching")
-        query_tasks, planner_notices = self.search.generate_query_plan(topic)
-        recall_result = self.search.recall(
-            topic,
-            self.config.scholarly_candidate_limit,
-            query_tasks=query_tasks,
-            planner_notices=planner_notices,
-        )
-        self.store.update_session(
-            session_id,
-            queries=recall_result["queries"],
-            metadata={
-                "source_statuses": recall_result["source_statuses"],
-                "skipped_sources": recall_result["skipped_sources"],
-                "degradation_notices": recall_result["degradation_notices"],
-            },
-            status="screening",
-        )
-        screened = self.screening.screen(
-            topic,
-            recall_result["papers"],
-            recall_result["queries"],
-        )
-        self.store.upsert_session_papers(session_id, screened, clear_existing=True)
-        self.store.update_session(session_id, status="ready")
 
     def _included_papers(self, papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
         included = [

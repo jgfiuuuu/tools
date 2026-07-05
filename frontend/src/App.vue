@@ -11,9 +11,8 @@
         <div class="brand-lockup" :class="{ compact: !leftSidebarOpen }">
           <div class="brand-mark">MM</div>
           <div v-if="leftSidebarOpen">
-            <p class="eyebrow">Miaowen Workbench</p>
             <h1>文献妙妙屋</h1>
-            <p class="brand-copy">以筛选、阅读、判断为中心的 AI/CS 文献工作台。</p>
+            <p class="brand-eyebrow">MIAOWEN LITERATURE WORKBENCH</p>
           </div>
         </div>
         <button
@@ -173,13 +172,33 @@
 
       <p v-if="error" class="banner error-banner">{{ error }}</p>
 
-      <section
-        v-if="currentSession && (degradationNotices.length || queryTasks.length)"
-        class="process-strip"
-      >
+      <section v-if="currentSession" class="process-strip">
         <div class="process-summary" :title="currentSessionSourceText">
           <span class="process-label">Sources</span>
           <span class="process-text">{{ currentSessionSourceText }}</span>
+        </div>
+
+        <div
+          v-if="frontierStatusText || candidatePoolText || sourceHealthText"
+          class="session-summary-grid"
+        >
+          <article v-if="frontierStatusText" class="session-summary-card">
+            <span class="session-summary-label">Frontier</span>
+            <strong>{{ frontierStatusText }}</strong>
+            <p class="muted">{{ frontierReasonText }}</p>
+          </article>
+
+          <article v-if="candidatePoolText" class="session-summary-card">
+            <span class="session-summary-label">Candidates</span>
+            <strong>{{ candidatePoolText }}</strong>
+            <p class="muted">{{ candidatePoolDetailText }}</p>
+          </article>
+
+          <article v-if="sourceHealthText" class="session-summary-card">
+            <span class="session-summary-label">Source Health</span>
+            <strong>{{ sourceHealthText }}</strong>
+            <p class="muted">{{ sourceHealthDetailText }}</p>
+          </article>
         </div>
 
         <details v-if="degradationNotices.length" class="process-detail compact-banner warning-banner">
@@ -300,7 +319,7 @@
             }"
             @click="selectPaper(paper.id)"
           >
-            <div class="paper-rank">#{{ paper.rank }}</div>
+            <div class="paper-rank">{{ String(paper.rank).padStart(2, '0') }}</div>
             <div class="paper-main">
               <div class="paper-title-row">
                 <h3>{{ paper.title }}</h3>
@@ -644,6 +663,8 @@ import {
   type ResearchQueryTask,
   type ResearchReport,
   type ResearchSession,
+  type SessionMetadata,
+  type SessionMetrics,
   type ScholarlyPaper,
   type StreamEvent
 } from "./services/api";
@@ -706,6 +727,14 @@ const latestReport = computed<ResearchReport | null>(
 const queryTasks = computed(() =>
   normalizeQueryTasks(currentSession.value?.queries ?? [])
 );
+const sessionMetadata = computed<SessionMetadata>(() =>
+  normalizeSessionMetadata(currentSession.value?.metadata)
+);
+const sessionMetrics = computed<SessionMetrics>(() =>
+  normalizeSessionMetrics(
+    currentSession.value?.metrics ?? sessionMetadata.value.metrics
+  )
+);
 const degradationNotices = computed(
   () => currentSession.value?.degradation_notices ?? []
 );
@@ -760,6 +789,124 @@ const currentSessionSourceText = computed(() => {
     return "正在等待本次会话的检索与筛选元数据。";
   }
   return parts.join(" · ");
+});
+
+const frontierStatusText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  if (
+    !["ready", "reported"].includes(currentSession.value.status) &&
+    !sessionMetadata.value.frontier_mode &&
+    !sessionMetrics.value.final_candidate_count
+  ) {
+    return "";
+  }
+  return sessionMetadata.value.frontier_mode ? "Triggered" : "Not triggered";
+});
+
+const frontierReasonText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const metrics = sessionMetrics.value;
+  const expansionMix = metrics.frontier_query_count
+    ? `Queries: adj ${metrics.frontier_adjacent_query_count ?? 0} / recent ${metrics.frontier_recent_query_count ?? 0} / broader ${metrics.frontier_broader_query_count ?? 0}.`
+    : "";
+  const frontierSelected = metrics.frontier_selected_count
+    ? `Selected frontier papers: ${metrics.frontier_selected_count}.`
+    : "";
+  if (sessionMetadata.value.frontier_mode) {
+    return [formatFrontierReason(sessionMetadata.value.frontier_reason), expansionMix, frontierSelected]
+      .filter(Boolean)
+      .join(" ");
+  }
+  return [ "Direct high-relevance coverage was sufficient.", expansionMix ]
+    .filter(Boolean)
+    .join(" ");
+});
+
+const candidatePoolText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const metrics = sessionMetrics.value;
+  return [
+    `raw ${metrics.raw_paper_count ?? 0}`,
+    `deduped ${metrics.deduped_paper_count ?? 0}`,
+    `final ${metrics.final_candidate_count ?? 0}`,
+    `selected ${metrics.selected_count ?? 0}`
+  ].join(" -> ");
+});
+
+const candidatePoolDetailText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const metrics = sessionMetrics.value;
+  const parts = [
+    `queries direct ${metrics.direct_query_count ?? 0}`,
+    metrics.frontier_query_count
+      ? `frontier ${metrics.frontier_query_count}`
+      : "",
+    `purity ${formatPercent(metrics.candidate_pool_purity)}`,
+    `drift ${formatPercent(metrics.candidate_drift_score)}`,
+    `coverage ${formatPercent(metrics.direct_hit_coverage)}`,
+    metrics.core_task_total
+      ? `core hits ${metrics.core_task_hits ?? 0}/${metrics.core_task_total}`
+      : "",
+    metrics.dedupe_ratio !== undefined
+      ? `dedupe ${formatPercent(metrics.dedupe_ratio)}`
+      : ""
+  ].filter(Boolean);
+  return parts.join(" | ");
+});
+
+const sourceHealthText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const statuses = Object.values(currentSession.value.source_statuses ?? {});
+  if (!statuses.length) {
+    return "";
+  }
+  const healthy = statuses.filter((status) => status === "ok").length;
+  const degraded = statuses.filter((status) =>
+    ["failed", "partial_failure"].includes(status)
+  ).length;
+  const skipped = statuses.filter((status) => status.startsWith("skipped")).length;
+  return `healthy ${healthy} | degraded ${degraded} | skipped ${skipped}`;
+});
+
+const sourceHealthDetailText = computed(() => {
+  if (!currentSession.value) {
+    return "";
+  }
+  const contributions = Object.entries(
+    sessionMetadata.value.source_contributions ?? {}
+  )
+    .sort((left, right) => {
+      const leftScore =
+        (left[1]?.selected_hits ?? 0) * 10 + (left[1]?.top_pool_hits ?? 0);
+      const rightScore =
+        (right[1]?.selected_hits ?? 0) * 10 + (right[1]?.top_pool_hits ?? 0);
+      return rightScore - leftScore;
+    })
+    .slice(0, 3)
+    .map(
+      ([source, payload]) =>
+        `${source} ${payload.top_pool_hits ?? 0}/${payload.selected_hits ?? 0}`
+    );
+  if (currentSession.value.skipped_sources.length && contributions.length) {
+    return `${contributions.join(" | ")} | Skipped: ${currentSession.value.skipped_sources.join(", ")}`;
+  }
+  if (contributions.length) {
+    return `Top contributors top/selected: ${contributions.join(" | ")}`;
+  }
+  if (currentSession.value.skipped_sources.length) {
+    return `Skipped: ${currentSession.value.skipped_sources.join(", ")}`;
+  }
+  return "Session detail metadata is available for all active sources.";
 });
 
 const filteredPapers = computed(() => {
@@ -1268,12 +1415,18 @@ async function copyText(value: string) {
 }
 
 function normalizeSession(session: ResearchSession): ResearchSession {
+  const metadata = normalizeSessionMetadata(session.metadata);
   return {
     ...session,
+    metadata,
     queries: Array.isArray(session.queries) ? session.queries : [],
-    source_statuses: session.source_statuses ?? {},
-    skipped_sources: session.skipped_sources ?? [],
-    degradation_notices: session.degradation_notices ?? [],
+    source_statuses: session.source_statuses ?? metadata.source_statuses ?? {},
+    skipped_sources: session.skipped_sources ?? metadata.skipped_sources ?? [],
+    degradation_notices:
+      session.degradation_notices ?? metadata.degradation_notices ?? [],
+    frontier_mode: session.frontier_mode ?? metadata.frontier_mode ?? false,
+    frontier_reason: session.frontier_reason ?? metadata.frontier_reason ?? null,
+    metrics: normalizeSessionMetrics(session.metrics ?? metadata.metrics),
     papers: (session.papers ?? []).map(normalizePaper),
     reports: session.reports ?? []
   };
@@ -1284,7 +1437,19 @@ function normalizePaper(paper: ScholarlyPaper): ScholarlyPaper {
     ...paper,
     authors: Array.isArray(paper.authors) ? paper.authors : [],
     tags: Array.isArray(paper.tags) ? paper.tags : [],
-    query_matches: Array.isArray(paper.query_matches) ? paper.query_matches : []
+    query_matches: Array.isArray(paper.query_matches)
+      ? paper.query_matches.map((match) => ({
+          ...match,
+          frontier_expansion:
+            typeof match.frontier_expansion === "string"
+              ? match.frontier_expansion
+              : null,
+          parent_subtask_id:
+            typeof match.parent_subtask_id === "string"
+              ? match.parent_subtask_id
+              : null
+        }))
+      : []
   };
 }
 
@@ -1305,13 +1470,140 @@ function normalizeQueryTasks(queries: Array<string | ResearchQueryTask>): Resear
             query_type: "core",
             query_text: item,
             result_count: 0,
-            status: "ok"
+            status: "ok",
+            frontier_expansion: null,
+            parent_subtask_id: null
           }
-        ]
+        ],
+        frontier_expansion: null,
+        parent_subtask_id: null
       };
     }
-    return item;
+    return {
+      ...item,
+      base_terms: Array.isArray(item.base_terms) ? item.base_terms : [],
+      query_types: Array.isArray(item.query_types) ? item.query_types : [],
+      result_count: typeof item.result_count === "number" ? item.result_count : 0,
+      status: typeof item.status === "string" ? item.status : "pending",
+      frontier_expansion:
+        typeof item.frontier_expansion === "string"
+          ? item.frontier_expansion
+          : null,
+      parent_subtask_id:
+        typeof item.parent_subtask_id === "string"
+          ? item.parent_subtask_id
+          : null,
+      variants: Array.isArray(item.variants)
+        ? item.variants.map((variant, variantIndex) => ({
+            ...variant,
+            query_id:
+              typeof variant.query_id === "string"
+                ? variant.query_id
+                : `${item.subtask_id}_${variantIndex}`,
+            query_type:
+              typeof variant.query_type === "string" ? variant.query_type : "core",
+            query_text:
+              typeof variant.query_text === "string" ? variant.query_text : "",
+            result_count:
+              typeof variant.result_count === "number" ? variant.result_count : 0,
+            status: typeof variant.status === "string" ? variant.status : "pending",
+            frontier_expansion:
+              typeof variant.frontier_expansion === "string"
+                ? variant.frontier_expansion
+                : typeof item.frontier_expansion === "string"
+                  ? item.frontier_expansion
+                  : null,
+            parent_subtask_id:
+              typeof variant.parent_subtask_id === "string"
+                ? variant.parent_subtask_id
+                : typeof item.parent_subtask_id === "string"
+                  ? item.parent_subtask_id
+                  : null
+          }))
+        : []
+    };
   });
+}
+
+function normalizeSessionMetadata(
+  metadata: SessionMetadata | undefined
+): SessionMetadata {
+  return {
+    ...(metadata ?? {}),
+    source_statuses:
+      metadata?.source_statuses && typeof metadata.source_statuses === "object"
+        ? metadata.source_statuses
+        : {},
+    skipped_sources: Array.isArray(metadata?.skipped_sources)
+      ? metadata.skipped_sources
+      : [],
+    degradation_notices: Array.isArray(metadata?.degradation_notices)
+      ? metadata.degradation_notices
+      : [],
+    frontier_mode: Boolean(metadata?.frontier_mode),
+    frontier_reason:
+      typeof metadata?.frontier_reason === "string"
+        ? metadata.frontier_reason
+        : null,
+    metrics: normalizeSessionMetrics(metadata?.metrics),
+    source_contributions:
+      metadata?.source_contributions &&
+      typeof metadata.source_contributions === "object"
+        ? metadata.source_contributions
+        : {}
+  };
+}
+
+function normalizeSessionMetrics(
+  metrics: SessionMetrics | undefined
+): SessionMetrics {
+  return {
+    raw_paper_count: 0,
+    deduped_paper_count: 0,
+    coarse_candidate_count: 0,
+    final_candidate_count: 0,
+    selected_count: 0,
+    high_relevance_count: 0,
+    strict_relevance_count: 0,
+    average_top_coarse_score: 0,
+    core_task_hits: 0,
+    core_task_total: 0,
+    direct_query_count: 0,
+    direct_core_query_count: 0,
+    frontier_query_count: 0,
+    frontier_adjacent_query_count: 0,
+    frontier_broader_query_count: 0,
+    frontier_recent_query_count: 0,
+    frontier_added_raw_count: 0,
+    candidate_pool_purity: 0,
+    candidate_drift_score: 0,
+    direct_hit_coverage: 0,
+    frontier_contribution_rate: 0,
+    frontier_selected_count: 0,
+    dedupe_ratio: 0,
+    ...(metrics ?? {})
+  };
+}
+
+function formatPercent(value: number | undefined) {
+  const ratio = typeof value === "number" ? value : 0;
+  return `${Math.round(ratio * 100)}%`;
+}
+
+function formatFrontierReason(reason: string | null | undefined) {
+  if (!reason) {
+    return "Fallback expanded the query frontier for sparse direct matches.";
+  }
+  const mapping: Record<string, string> = {
+    high_relevance_sparse: "High-relevance direct hits were sparse.",
+    low_average_coarse_score: "Average coarse score stayed low.",
+    weak_core_query_hits: "Core query coverage was weak.",
+    empty_candidate_pool: "The direct candidate pool was empty."
+  };
+  return reason
+    .split(",")
+    .map((item) => mapping[item.trim()] || item.trim())
+    .join(" ");
 }
 
 function mergeQueryTask(subtask: ResearchQueryTask) {
@@ -1517,34 +1809,60 @@ function persistBoolean(key: string, value: boolean) {
 
 <style scoped>
 .workspace {
-  --bg: #e8dfcf;
-  --surface: rgba(243, 236, 225, 0.96);
-  --surface-strong: rgba(250, 246, 238, 0.98);
-  --line: #b2a388;
-  --line-soft: rgba(90, 74, 52, 0.18);
-  --text: #201a14;
-  --muted: #6f6557;
-  --accent: #4f4030;
-  --accent-strong: #20160f;
-  --success: #35573b;
-  --warning: #916a28;
-  --danger: #923939;
-  --left-width: 288px;
-  --right-width: 430px;
+  --bg: #e8e6e2;
+  --surface: #f4f3f0;
+  --surface-strong: #fafaf8;
+  --line: rgba(58, 52, 46, 0.16);
+  --line-soft: rgba(58, 52, 46, 0.08);
+  --line-strong: rgba(58, 52, 46, 0.32);
+  --text: #2a2622;
+  --muted: #89837c;
+  --accent: #4a4238;
+  --accent-strong: #363026;
+  --success: #4a5647;
+  --warning: #6b5d45;
+  --danger: #6b4a47;
+  --ink-mark: #3d3530;
+  --paper-edge: #d8d6d2;
+  --font-sans: "Inter", -apple-system, "Helvetica Neue", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Consolas, "Cascadia Code", monospace;
+  --text-2xs: 9px;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+  --space-2xs: 2px;
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  --shadow-subtle: 0 2px 4px rgba(42, 38, 34, 0.08);
+  --shadow-medium: 0 4px 12px rgba(42, 38, 34, 0.12);
+  --shadow-strong: 0 12px 24px rgba(42, 38, 34, 0.18);
+  --left-width: 280px;
+  --right-width: 420px;
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
   display: grid;
   grid-template-columns: var(--left-width) minmax(0, 1fr) var(--right-width);
   color: var(--text);
+  font-family: var(--font-sans);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0)),
     repeating-linear-gradient(
       0deg,
-      rgba(90, 74, 52, 0.05) 0,
-      rgba(90, 74, 52, 0.05) 1px,
-      transparent 1px,
-      transparent 34px
+      transparent 0,
+      transparent 31px,
+      rgba(58, 52, 46, 0.02) 31px,
+      rgba(58, 52, 46, 0.02) 32px
     ),
     var(--bg);
 }
@@ -1568,7 +1886,7 @@ function persistBoolean(key: string, value: boolean) {
 .right-rail {
   display: flex;
   flex-direction: column;
-  background: rgba(238, 230, 217, 0.94);
+  background: var(--surface);
   border-right: 1px solid var(--line-soft);
   overflow: hidden;
 }
@@ -1576,16 +1894,17 @@ function persistBoolean(key: string, value: boolean) {
 .right-rail {
   border-right: none;
   border-left: 1px solid var(--line-soft);
+  box-shadow: -2px 0 8px rgba(42, 38, 34, 0.04);
 }
 
 .center-stage {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-xl);
   padding: 22px 24px 24px;
   min-height: 0;
   overflow: hidden;
-  background: rgba(252, 248, 241, 0.36);
+  background: transparent;
 }
 
 .rail-top {
@@ -1665,18 +1984,33 @@ pre {
 .stage-heading h2,
 .detail-hero h2,
 .report-hero h2 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-serif);
+}
+
+.paper-rank,
+code,
+.query-card code,
+.report-draft {
+  font-family: var(--font-mono);
 }
 
 .brand-lockup h1 {
-  font-size: 24px;
+  font-size: var(--text-2xl);
   line-height: 1.1;
 }
 
 .brand-copy {
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
   max-width: 22ch;
+}
+
+.brand-eyebrow {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  line-height: 1.3;
 }
 
 .form-head {
@@ -1688,7 +2022,7 @@ pre {
 .form-head h2 {
   font-size: 17px;
   line-height: 1.15;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-serif);
 }
 
 .brand-copy,
@@ -1731,14 +2065,27 @@ pre {
 .primary-link {
   padding: 11px 14px;
   background: var(--accent-strong);
-  color: #f8f1e5;
+  color: #fafaf8;
   border-color: var(--accent-strong);
+  transition: all 140ms ease;
+}
+
+.primary-btn:hover,
+.primary-link:hover {
+  background: var(--ink-mark);
 }
 
 .secondary-btn,
 .secondary-link {
   padding: 11px 14px;
-  background: rgba(255, 251, 243, 0.9);
+  background: var(--surface-strong);
+  transition: all 140ms ease;
+}
+
+.secondary-btn:hover,
+.secondary-link:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow-subtle);
 }
 
 .primary-link,
@@ -1849,7 +2196,7 @@ pre {
 }
 
 .side-block + .side-block {
-  margin-top: 12px;
+  margin-top: var(--space-lg);
 }
 
 .side-actions {
@@ -1938,7 +2285,7 @@ select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(255, 251, 243, 0.92);
+  background: var(--surface-strong);
   padding: 10px 12px;
   color: var(--text);
   font: inherit;
@@ -1955,7 +2302,7 @@ input:focus,
 select:focus,
 button:focus,
 a:focus {
-  outline: 2px solid rgba(79, 64, 48, 0.28);
+  outline: 2px solid var(--line-strong);
   outline-offset: 2px;
 }
 
@@ -1965,7 +2312,7 @@ a:focus {
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-md);
 }
 
 .stage-actions .primary-btn,
@@ -1983,14 +2330,14 @@ a:focus {
 .topic-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-lg);
 }
 
 .section-title {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-lg);
   margin-bottom: 10px;
 }
 
@@ -2019,16 +2366,22 @@ a:focus {
 .session-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px;
+  gap: var(--space-2xs);
   align-items: stretch;
   border: none;
-  border-left: 2px solid transparent;
+  border-left: 2px solid var(--line-soft);
   background: transparent;
+  padding-left: var(--space-md);
+  transition: all 140ms ease;
+}
+
+.session-item:hover {
+  background: rgba(250, 250, 248, 0.42);
 }
 
 .session-item.active {
-  border-color: var(--accent);
-  background: rgba(255, 245, 229, 0.68);
+  border-left: 3px solid var(--ink-mark);
+  background: rgba(250, 250, 248, 0.6);
 }
 
 .session-select {
@@ -2122,7 +2475,7 @@ a:focus {
 .label-chip,
 .stat-chip {
   border: 1px solid var(--line-soft);
-  background: rgba(255, 251, 243, 0.92);
+  background: var(--surface-strong);
 }
 
 .status-pill,
@@ -2194,13 +2547,45 @@ a:focus {
   text-overflow: ellipsis;
 }
 
+.session-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.session-summary-card {
+  border: 1px solid var(--line-soft);
+  background: var(--surface-strong);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-summary-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.session-summary-card strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.session-summary-card p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .stage-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-lg);
   border-bottom: 1px solid var(--line-soft);
-  padding-bottom: 8px;
+  padding-bottom: var(--space-lg);
   flex-shrink: 0;
 }
 
@@ -2219,8 +2604,8 @@ a:focus {
 }
 
 .stage-heading h2 {
-  font-size: 22px;
-  line-height: 1.15;
+  font-size: var(--text-2xl);
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2238,7 +2623,7 @@ a:focus {
 
 .stage-meta-line,
 .stage-subtitle {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 
@@ -2284,7 +2669,7 @@ a:focus {
 
 .process-detail {
   border: 1px solid var(--line-soft);
-  background: rgba(250, 246, 238, 0.82);
+  background: var(--surface);
 }
 
 .compact-banner {
@@ -2351,7 +2736,7 @@ a:focus {
   border-bottom: none;
   border-left: none;
   padding: 12px;
-  background: rgba(255, 250, 242, 0.38);
+  background: rgba(250, 250, 248, 0.6);
 }
 
 .query-card-head,
@@ -2382,7 +2767,7 @@ a:focus {
   padding: 4px 8px;
   border: 1px solid var(--line-soft);
   font-size: 12px;
-  background: rgba(255, 248, 236, 0.96);
+  background: var(--surface-strong);
 }
 
 .variant-list {
@@ -2402,45 +2787,62 @@ code {
   margin: 8px 0 6px;
   padding: 8px 10px;
   border: 1px solid var(--line-soft);
-  background: rgba(247, 242, 233, 0.96);
-  font-family: "Cascadia Code", Consolas, monospace;
+  background: var(--surface-strong);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
 .filter-bar {
-  display: grid;
-  grid-template-columns: minmax(260px, 1.6fr) repeat(3, minmax(0, 0.72fr));
-  gap: 8px;
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 8px 12px;
   flex-shrink: 0;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .filter-bar label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 0 10px;
-  border: 1px solid var(--line-soft);
-  background: rgba(255, 249, 240, 0.94);
+  gap: var(--space-sm);
+  min-height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
   font-weight: 500;
+}
+
+.filter-bar .search-control {
+  flex: 1 1 280px;
+  min-width: 0;
 }
 
 .filter-bar label span {
   color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--text-sm);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .filter-bar input,
 .filter-bar select {
-  border: none;
-  background: transparent;
-  padding: 10px 0;
+  min-height: 36px;
+}
+
+.filter-bar .search-control input {
+  min-width: 0;
+}
+
+.filter-bar select {
+  width: auto;
+  min-width: 100px;
 }
 
 .paper-stage {
@@ -2474,35 +2876,26 @@ code {
 .paper-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr) 92px;
-  gap: 12px;
-  padding: 14px 8px 14px 10px;
+  gap: var(--space-lg);
+  padding: 14px 8px 14px 14px;
   border: none;
+  border-left: 2px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
   background: transparent;
   cursor: pointer;
   position: relative;
-}
-
-.paper-row::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  background: transparent;
+  transition: all 160ms ease;
 }
 
 .paper-row:hover {
-  background: rgba(255, 248, 236, 0.54);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-subtle);
 }
 
 .paper-row.active {
-  background: rgba(255, 244, 224, 0.78);
-}
-
-.paper-row.active::before {
-  background: var(--accent);
+  background: var(--surface-strong);
+  border-left: 3px solid var(--ink-mark);
+  box-shadow: var(--shadow-medium);
 }
 
 .paper-row.excluded {
@@ -2510,10 +2903,12 @@ code {
 }
 
 .paper-rank {
-  font-size: 28px;
-  line-height: 1;
-  font-family: Georgia, "Times New Roman", serif;
-  color: var(--accent);
+  min-width: 32px;
+  color: var(--ink-mark);
+  font-size: var(--text-md);
+  line-height: 1.2;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .paper-main {
@@ -2607,7 +3002,9 @@ code {
 .detail-hero,
 .report-hero {
   align-items: flex-start;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-lg);
+  border-top: 2px solid var(--paper-edge);
+  padding-top: var(--space-xl);
 }
 
 .detail-heading {
@@ -2654,8 +3051,8 @@ code {
   min-width: 42px;
   padding: 4px 8px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.92);
-  color: var(--accent);
+  background: var(--surface-strong);
+  color: var(--ink-mark);
   font-size: 12px;
   font-weight: 700;
 }
@@ -2680,7 +3077,7 @@ code {
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(255, 251, 243, 0.92);
+  background: var(--surface-strong);
   cursor: pointer;
   font-size: 12px;
 }
@@ -2688,7 +3085,7 @@ code {
 .status-actions button.active {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
-  color: #f8f1e5;
+  color: #fafaf8;
 }
 
 .status-actions button.danger {
@@ -2697,7 +3094,7 @@ code {
 
 .cite-box {
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.92);
+  background: var(--surface-strong);
   padding: 10px 12px;
 }
 
@@ -2758,7 +3155,7 @@ code {
 
 .match-list li {
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.92);
+  background: var(--surface-strong);
   padding: 10px;
 }
 
@@ -2796,7 +3193,7 @@ code {
 .report-toc button {
   padding: 8px 10px;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.92);
+  background: var(--surface-strong);
   cursor: pointer;
 }
 
@@ -2896,15 +3293,14 @@ code {
 .report-draft {
   white-space: pre-wrap;
   line-height: 1.75;
-  font-family: "Cascadia Code", Consolas, monospace;
   border: 1px solid var(--line-soft);
-  background: rgba(255, 250, 242, 0.92);
+  background: var(--surface-strong);
   padding: 14px;
 }
 
 .empty-state {
   border: 1px dashed var(--line);
-  background: rgba(255, 250, 242, 0.7);
+  background: var(--surface);
   padding: 22px;
   text-align: center;
   line-height: 1.8;
@@ -2927,7 +3323,7 @@ code {
 .dialog-panel {
   width: min(520px, 100%);
   border: 1px solid var(--line);
-  background: rgba(247, 240, 228, 0.98);
+  background: var(--surface-strong);
   padding: 18px;
   display: flex;
   flex-direction: column;
@@ -2935,7 +3331,7 @@ code {
 }
 
 .dialog-panel h2 {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--font-serif);
   font-size: 26px;
 }
 
@@ -2947,10 +3343,6 @@ code {
   .workspace {
     --left-width: 270px;
     --right-width: 380px;
-  }
-
-  .filter-bar {
-    grid-template-columns: minmax(200px, 1.2fr) repeat(3, minmax(120px, 0.6fr));
   }
 }
 
@@ -3012,8 +3404,23 @@ code {
     flex-direction: column;
   }
 
-  .filter-bar,
   .query-grid,
+  .session-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .filter-bar label,
+  .filter-bar .search-control,
+  .filter-bar select {
+    width: 100%;
+  }
+
   .derive-form {
     grid-template-columns: 1fr;
   }

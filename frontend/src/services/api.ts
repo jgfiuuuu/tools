@@ -34,6 +34,8 @@ export interface QueryMatch {
   query_type: string;
   query_text: string;
   source: string;
+  frontier_expansion?: string | null;
+  parent_subtask_id?: string | null;
 }
 
 export interface ResearchQueryVariant {
@@ -42,6 +44,8 @@ export interface ResearchQueryVariant {
   query_text: string;
   result_count: number;
   status: string;
+  frontier_expansion?: string | null;
+  parent_subtask_id?: string | null;
   sources_attempted?: string[];
   sources_succeeded?: string[];
   sources_failed?: Array<{ source: string; reason: string }>;
@@ -57,6 +61,8 @@ export interface ResearchQueryTask {
   variants: ResearchQueryVariant[];
   result_count: number;
   status: string;
+  frontier_expansion?: string | null;
+  parent_subtask_id?: string | null;
 }
 
 export interface ResearchReport {
@@ -66,15 +72,65 @@ export interface ResearchReport {
   created_at: string;
 }
 
+export interface SessionMetrics {
+  raw_paper_count?: number;
+  deduped_paper_count?: number;
+  coarse_candidate_count?: number;
+  final_candidate_count?: number;
+  selected_count?: number;
+  high_relevance_count?: number;
+  strict_relevance_count?: number;
+  average_top_coarse_score?: number;
+  core_task_hits?: number;
+  core_task_total?: number;
+  direct_query_count?: number;
+  direct_core_query_count?: number;
+  frontier_query_count?: number;
+  frontier_adjacent_query_count?: number;
+  frontier_broader_query_count?: number;
+  frontier_recent_query_count?: number;
+  frontier_added_raw_count?: number;
+  candidate_pool_purity?: number;
+  candidate_drift_score?: number;
+  direct_hit_coverage?: number;
+  frontier_contribution_rate?: number;
+  frontier_selected_count?: number;
+  dedupe_ratio?: number;
+}
+
+export interface SourceContribution {
+  status?: string;
+  raw_hits?: number;
+  deduped_hits?: number;
+  top_pool_hits?: number;
+  selected_hits?: number;
+  direct_top_hits?: number;
+  frontier_top_hits?: number;
+}
+
+export interface SessionMetadata {
+  source_statuses?: Record<string, string>;
+  skipped_sources?: string[];
+  degradation_notices?: string[];
+  frontier_mode?: boolean;
+  frontier_reason?: string | null;
+  metrics?: SessionMetrics;
+  source_contributions?: Record<string, SourceContribution>;
+  [key: string]: unknown;
+}
+
 export interface ResearchSession {
   id: string;
   topic: string;
   status: string;
   queries: Array<string | ResearchQueryTask>;
-  metadata?: Record<string, unknown>;
+  metadata?: SessionMetadata;
   source_statuses: Record<string, string>;
   skipped_sources: string[];
   degradation_notices: string[];
+  frontier_mode?: boolean;
+  frontier_reason?: string | null;
+  metrics?: SessionMetrics;
   parent_session_id: string | null;
   created_at: string;
   updated_at: string;
