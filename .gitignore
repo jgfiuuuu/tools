@@ -1,0 +1,30 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/src/__pycache__/
+backend/src/services/__pycache__/
+backend/*.egg-info/
+backend/src/*.egg-info/
+backend/*.log
+.pytest_cache/
+.ruff_cache/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Local env and runtime state
+backend/.env
+backend/src/.env
+backend/.input
+backend/notes/
+backend/src/notes/
+frontend/.env.local
+frontend/.input
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
