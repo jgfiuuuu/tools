@@ -95,6 +95,11 @@ class Configuration(BaseModel):
         title="Scholarly DB Path",
         description="SQLite database path for research sessions",
     )
+    scholarly_artifact_dir: str = Field(
+        default="./scholarly_artifacts",
+        title="Scholarly Artifact Dir",
+        description="Directory for uploaded PDFs and extracted fulltext artifacts",
+    )
     scholarly_candidate_limit: int = Field(
         default=50,
         title="Scholarly Candidate Limit",
@@ -155,6 +160,7 @@ class Configuration(BaseModel):
             "enable_notes": os.getenv("ENABLE_NOTES"),
             "notes_workspace": os.getenv("NOTES_WORKSPACE"),
             "scholarly_db_path": os.getenv("SCHOLARLY_DB_PATH"),
+            "scholarly_artifact_dir": os.getenv("SCHOLARLY_ARTIFACT_DIR"),
             "scholarly_candidate_limit": os.getenv("SCHOLARLY_CANDIDATE_LIMIT"),
             "scholarly_selection_limit": os.getenv("SCHOLARLY_SELECTION_LIMIT"),
             "openalex_api_key": os.getenv("OPENALEX_API_KEY"),

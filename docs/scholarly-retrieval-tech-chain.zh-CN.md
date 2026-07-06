@@ -163,12 +163,12 @@ B. Scholarly Retrieval Workbench
 
 相关文件：
 
-- [agent.py](F:/codex/deepresearch/backend/src/agent.py)
-- [planner.py](F:/codex/deepresearch/backend/src/services/planner.py)
-- [search.py](F:/codex/deepresearch/backend/src/services/search.py)
-- [summarizer.py](F:/codex/deepresearch/backend/src/services/summarizer.py)
-- [reporter.py](F:/codex/deepresearch/backend/src/services/reporter.py)
-- [tool_events.py](F:/codex/deepresearch/backend/src/services/tool_events.py)
+- [agent.py](../backend/src/agent.py)
+- [planner.py](../backend/src/services/planner.py)
+- [search.py](../backend/src/services/search.py)
+- [summarizer.py](../backend/src/services/summarizer.py)
+- [reporter.py](../backend/src/services/reporter.py)
+- [tool_events.py](../backend/src/services/tool_events.py)
 
 ### 这一阶段的技术链
 
@@ -234,11 +234,11 @@ Phase 1 能做研究，但更偏“临时工作流”。
 
 相关文件：
 
-- [main.py](F:/codex/deepresearch/backend/src/main.py)
-- [scholarly_store.py](F:/codex/deepresearch/backend/src/services/scholarly_store.py)
-- [scholarly_workflow.py](F:/codex/deepresearch/backend/src/services/scholarly_workflow.py)
-- [App.vue](F:/codex/deepresearch/frontend/src/App.vue)
-- [api.ts](F:/codex/deepresearch/frontend/src/services/api.ts)
+- [main.py](../backend/src/main.py)
+- [scholarly_store.py](../backend/src/services/scholarly_store.py)
+- [scholarly_workflow.py](../backend/src/services/scholarly_workflow.py)
+- [App.vue](../frontend/src/App.vue)
+- [api.ts](../frontend/src/services/api.ts)
 
 这一阶段新增了新的产品面：
 
@@ -318,12 +318,12 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 相关文件：
 
-- [scholarly_search.py](F:/codex/deepresearch/backend/src/services/scholarly_search.py)
-- [scholarly_rerank.py](F:/codex/deepresearch/backend/src/services/scholarly_rerank.py)
-- [scholarly_graph.py](F:/codex/deepresearch/backend/src/services/scholarly_graph.py)
-- [scholarly_contracts.py](F:/codex/deepresearch/backend/src/services/scholarly_contracts.py)
-- [run_scholarly_eval.py](F:/codex/deepresearch/backend/evals/run_scholarly_eval.py)
-- [run_scholarly_live_smoke.py](F:/codex/deepresearch/backend/evals/run_scholarly_live_smoke.py)
+- [scholarly_search.py](../backend/src/services/scholarly_search.py)
+- [scholarly_rerank.py](../backend/src/services/scholarly_rerank.py)
+- [scholarly_graph.py](../backend/src/services/scholarly_graph.py)
+- [scholarly_contracts.py](../backend/src/services/scholarly_contracts.py)
+- [run_scholarly_eval.py](../backend/evals/run_scholarly_eval.py)
+- [run_scholarly_live_smoke.py](../backend/evals/run_scholarly_live_smoke.py)
 
 ### 这一阶段做了什么
 
@@ -532,7 +532,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [agent.py](F:/codex/deepresearch/backend/src/agent.py:34)
+- [agent.py](../backend/src/agent.py) line 34
 
 在 `OpenAICompatibleLLM.invoke()` 里，代码显式处理了：
 
@@ -558,7 +558,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [search.py](F:/codex/deepresearch/backend/src/services/search.py:19)
+- [search.py](../backend/src/services/search.py) line 19
 
 这里专门有 `_ensure_unicode_console_output()`。
 
@@ -578,8 +578,8 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [agent.py](F:/codex/deepresearch/backend/src/agent.py:238)
-- [reporter.py](F:/codex/deepresearch/backend/src/services/reporter.py:91)
+- [agent.py](../backend/src/agent.py) line 238
+- [reporter.py](../backend/src/services/reporter.py) line 91
 
 代码里有大量针对：
 
@@ -609,7 +609,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [planner.py](F:/codex/deepresearch/backend/src/services/planner.py:71)
+- [planner.py](../backend/src/services/planner.py) line 71
 
 可以看到 planner 同时支持：
 
@@ -634,7 +634,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [tool_events.py](F:/codex/deepresearch/backend/src/services/tool_events.py:92)
+- [tool_events.py](../backend/src/services/tool_events.py) line 92
 
 ### 说明项目遇到过什么问题
 
@@ -654,7 +654,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 
 证据位置：
 
-- [scholarly_store.py](F:/codex/deepresearch/backend/src/services/scholarly_store.py:457)
+- [scholarly_store.py](../backend/src/services/scholarly_store.py) line 457
 
 里面有 `_ensure_column()`。
 
@@ -720,7 +720,7 @@ Phase 2 已经有 UI、有 session、有候选池。
 把缓存路径切到项目目录：
 
 ```powershell
-$env:UV_CACHE_DIR='F:\codex\deepresearch\.uv-cache'
+$env:UV_CACHE_DIR='.\.uv-cache'
 ```
 
 ### 结果

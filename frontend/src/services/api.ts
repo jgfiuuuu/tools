@@ -25,6 +25,11 @@ export interface ScholarlyPaper {
   query_matches: QueryMatch[];
   user_status: string;
   tags: string[];
+  fulltext_source: string | null;
+  fulltext_status: string;
+  fulltext_original_filename: string | null;
+  fulltext_text_char_count: number;
+  fulltext_updated_at: string | null;
 }
 
 export interface QueryMatch {
@@ -72,6 +77,138 @@ export interface ResearchReport {
   created_at: string;
 }
 
+export type ReportFitTier = "core" | "adjacent_transfer" | "off_target";
+export type ReportTone = "evidence" | "judgment" | "speculation" | "action" | "note";
+export type ReportItemKind = "paragraph" | "bullet" | "ordered";
+
+export interface ReportContext {
+  session_id?: string;
+  topic?: string;
+  evidence_count?: number;
+  evidence_limit?: number;
+  evidence_limited?: boolean;
+  year_range?: {
+    start?: number | null;
+    end?: number | null;
+  };
+  year_range_text?: string;
+  main_sources?: Array<{ source: string; count: number }>;
+  main_sources_text?: string;
+  query_summary?: string;
+  fulltext_count?: number;
+  abstract_only_count?: number;
+  uploaded_pdf_count?: number;
+  evidence_mix?: Record<string, number>;
+  topic_boundary?: string;
+  topic_axes?: string[];
+  synthesis_mode?: "llm" | "fallback" | string;
+  evidence_bucket_counts?: Record<string, number>;
+}
+
+export interface ReportTaskArtifact {
+  id: number;
+  title: string;
+  intent: string;
+  summary: string;
+  note_id?: string | null;
+}
+
+export interface ReportSupportingNote {
+  id: string;
+  title: string;
+  type: string;
+  created_at: string;
+}
+
+export interface ReportPaperCard {
+  paper_id: string;
+  title: string;
+  year: number | null;
+  source: string | null;
+  evidence_level: string;
+  fulltext_source: string;
+  problem: string;
+  setting: string;
+  method: string;
+  key_claims: string[];
+  evidence: string[];
+  datasets_metrics: string[];
+  limitations: string[];
+  open_questions: string[];
+  source_excerpt_refs: string[];
+  fit_tier: ReportFitTier;
+  fit_reason: string;
+  task_family: string;
+  modality_family: string;
+  conditioning_family: string;
+  prediction_family: string;
+}
+
+export interface ReportEvidenceBuckets {
+  core: string[];
+  adjacent_transfer: string[];
+  off_target: string[];
+}
+
+export interface ReportMemoItem {
+  kind?: ReportItemKind;
+  tone?: ReportTone;
+  text: string;
+  order?: string;
+  evidence_paper_ids?: string[];
+}
+
+export interface ReportMemoEvidenceCard {
+  paper_id: string;
+  title: string;
+  fit_tier: ReportFitTier;
+  evidence_level: string;
+  task_family: string;
+  modality_family: string;
+  conditioning_family: string;
+  prediction_family: string;
+  key_claims: string[];
+  limitations: string[];
+}
+
+export interface ReportMemoSection {
+  id: string;
+  title: string;
+  icon?: string;
+  summary?: string;
+  items: ReportMemoItem[];
+  evidence_cards?: ReportMemoEvidenceCard[];
+  appendix?: boolean;
+}
+
+export interface ReportReviewSection {
+  id: string;
+  title: string;
+  icon?: string;
+  summary?: string;
+  narrative_paragraphs?: string[];
+  insight_items?: ReportMemoItem[];
+  evidence_cards?: ReportMemoEvidenceCard[];
+  appendix?: boolean;
+}
+
+export interface ReportSectionGeneration {
+  section_id: string;
+  title?: string;
+  mode: "llm" | "fallback" | string;
+  appendix?: boolean;
+}
+
+export interface ReportArtifacts {
+  tasks?: ReportTaskArtifact[];
+  supporting_notes?: ReportSupportingNote[];
+  paper_cards?: ReportPaperCard[];
+  memo_sections?: ReportMemoSection[];
+  review_sections?: ReportReviewSection[];
+  section_generation?: ReportSectionGeneration[];
+  evidence_buckets?: ReportEvidenceBuckets;
+}
+
 export interface SessionMetrics {
   raw_paper_count?: number;
   deduped_paper_count?: number;
@@ -108,6 +245,19 @@ export interface SourceContribution {
   frontier_top_hits?: number;
 }
 
+export interface LlmUsageStage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
+export interface LlmUsageSummary {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  by_stage?: Record<string, LlmUsageStage>;
+}
+
 export interface SessionMetadata {
   source_statuses?: Record<string, string>;
   skipped_sources?: string[];
@@ -116,6 +266,9 @@ export interface SessionMetadata {
   frontier_reason?: string | null;
   metrics?: SessionMetrics;
   source_contributions?: Record<string, SourceContribution>;
+  llm_usage?: LlmUsageSummary;
+  report_context?: ReportContext;
+  report_artifacts?: ReportArtifacts;
   [key: string]: unknown;
 }
 
@@ -279,6 +432,35 @@ export function updateSessionPaper(
     {
       method: "PATCH",
       body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function uploadPaperPdf(
+  sessionId: string,
+  paperId: string,
+  payload: {
+    filename: string;
+    content_base64: string;
+  }
+): Promise<ScholarlyPaper> {
+  return requestJson<ScholarlyPaper>(
+    `/research/sessions/${sessionId}/papers/${paperId}/pdf`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function resolvePaperFulltext(
+  sessionId: string,
+  paperId: string
+): Promise<ScholarlyPaper> {
+  return requestJson<ScholarlyPaper>(
+    `/research/sessions/${sessionId}/papers/${paperId}/fulltext/resolve`,
+    {
+      method: "POST"
     }
   );
 }

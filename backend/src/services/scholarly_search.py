@@ -15,14 +15,16 @@ from typing import Any
 from urllib.parse import quote_plus
 
 import requests
-from openai import OpenAI
 
 from config import Configuration
 from services.scholarly_contracts import (
     WORKFLOW_METRIC_DEFAULTS,
+    default_llm_usage,
     default_session_metadata,
     default_workflow_metrics,
+    merge_llm_usage,
 )
+from services.scholarly_llm import ScholarlyLLMService
 from services.scholarly_store import normalize_title, paper_key
 
 logger = logging.getLogger(__name__)
@@ -218,22 +220,31 @@ class ScholarlySearchService:
         )
         self.timeout = 20
         self.max_retries = 1
+        self.llm = ScholarlyLLMService(config)
+        self._last_llm_usage = default_llm_usage()
 
     def generate_query_plan(self, topic: str) -> tuple[list[dict[str, Any]], list[str]]:
         """Build concept-first scholarly query subtasks."""
 
         notices: list[str] = []
+        self._last_llm_usage = default_llm_usage()
         rule_plan = self._rule_query_plan(topic)
 
         if not self._should_try_llm(topic):
             return rule_plan, notices
 
-        llm_plan = self._llm_query_plan(topic, rule_plan)
+        llm_plan, usage = self._llm_query_plan(topic, rule_plan)
+        self._last_llm_usage = merge_llm_usage(self._last_llm_usage, usage)
         if llm_plan:
             return llm_plan, notices
 
         notices.append("LLM 检索式规划不可用，已回退到规则拆词。")
         return rule_plan, notices
+
+    def latest_llm_usage(self) -> dict[str, Any]:
+        """Expose the most recent query-planning usage payload."""
+
+        return default_llm_usage(self._last_llm_usage)
 
     def recall(
         self,
@@ -612,6 +623,7 @@ class ScholarlySearchService:
         frontier_reason: str | None = None,
         metrics: dict[str, Any] | None = None,
         existing_metadata: dict[str, Any] | None = None,
+        llm_usage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Compose stable session metadata plus retrieval quality summaries."""
 
@@ -702,6 +714,7 @@ class ScholarlySearchService:
                 ),
                 "metrics": merged_metrics,
                 "source_contributions": source_contributions,
+                "llm_usage": merge_llm_usage(existing.get("llm_usage"), llm_usage),
             }
         )
 
@@ -911,13 +924,15 @@ class ScholarlySearchService:
         limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
         search_query = self._build_arxiv_query(query)
+        if not search_query:
+            return [], "skipped_non_english_query"
         url = (
             "https://export.arxiv.org/api/query"
             f"?search_query={search_query}"
             f"&start=0&max_results={limit}"
             "&sortBy=relevance&sortOrder=descending"
         )
-        response, error = self._request(url)
+        response, error = self._request(url, timeout=(5, 35))
         if error is not None:
             logger.warning("arXiv search failed for %s: %s", query, error)
             return [], error
@@ -1076,6 +1091,7 @@ class ScholarlySearchService:
         *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | tuple[float, float] | None = None,
     ) -> tuple[requests.Response, str | None]:
         error_message = ""
         for attempt in range(self.max_retries + 1):
@@ -1084,7 +1100,7 @@ class ScholarlySearchService:
                     url,
                     params=params,
                     headers=headers,
-                    timeout=self.timeout,
+                    timeout=timeout if timeout is not None else self.timeout,
                 )
                 response.raise_for_status()
                 return response, None
@@ -1178,12 +1194,9 @@ class ScholarlySearchService:
         self,
         topic: str,
         seed_plan: list[dict[str, Any]],
-    ) -> list[dict[str, Any]] | None:
-        client = self._build_llm_client()
-        model = self.config.resolved_model()
-        if client is None or not model:
-            return None
-
+    ) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+        if not self.llm.available():
+            return None, default_llm_usage()
         seed_payload = [
             {
                 "concept": task["concept"],
@@ -1201,32 +1214,19 @@ class ScholarlySearchService:
             "Every base_terms item must be concise English academic search terms."
         )
         try:
-            response = client.chat.completions.create(
-                model=model,
+            payload, usage, _ = self.llm.complete_json(
+                stage="screening",
+                system_prompt=prompt,
+                user_payload={"topic": topic, "seed_plan": seed_payload},
                 temperature=0.0,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {"topic": topic, "seed_plan": seed_payload},
-                            ensure_ascii=False,
-                        ),
-                    },
-                ],
+                max_tokens=900,
             )
         except Exception as exc:  # pragma: no cover - depends on external LLM
             logger.warning("LLM query planning failed: %s", exc)
-            return None
-
-        content = response.choices[0].message.content if response.choices else None
-        if not content:
-            return None
-
-        payload = self._extract_json_payload(content)
+            return None, default_llm_usage()
         tasks = payload.get("tasks") if isinstance(payload, dict) else None
         if not isinstance(tasks, list):
-            return None
+            return None, usage
 
         planned: list[dict[str, Any]] = []
         for index, task in enumerate(tasks, start=1):
@@ -1245,29 +1245,7 @@ class ScholarlySearchService:
                     query_types=query_types,
                 )
             )
-        return planned[:5] or None
-
-    def _build_llm_client(self) -> OpenAI | None:
-        model = self.config.resolved_model()
-        if not model:
-            return None
-
-        provider = (self.config.llm_provider or "").strip().lower()
-        api_key = self.config.llm_api_key
-        base_url = self.config.llm_base_url
-        if provider == "ollama":
-            base_url = self.config.sanitized_ollama_url()
-            api_key = api_key or "ollama"
-        elif provider == "lmstudio":
-            base_url = self.config.lmstudio_base_url
-            api_key = api_key or "lmstudio"
-        elif not base_url:
-            return None
-
-        try:
-            return OpenAI(base_url=base_url, api_key=api_key or "placeholder")
-        except Exception:  # pragma: no cover - client init is trivial
-            return None
+        return planned[:5] or None, usage
 
     def _should_try_llm(self, topic: str) -> bool:
         return contains_cjk(topic) or len(tokenize(topic)) < 4
@@ -1386,9 +1364,11 @@ class ScholarlySearchService:
         return unique_strings(broader)[:4]
 
     def _build_arxiv_query(self, query: str) -> str:
-        tokens = query.split()
+        tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9._+\-]*", query)
+        if not tokens:
+            return ""
         if len(tokens) <= 2:
-            return quote_plus(f'all:"{query}"')
+            return quote_plus(f'all:"{" ".join(tokens)}"')
 
         phrase_terms = tokens[:3]
         trailing_terms = [token for token in tokens[3:] if token]

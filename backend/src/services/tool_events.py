@@ -153,9 +153,6 @@ class ToolCallTracker:
             "task_id": event.task_id,
             "note_id": event.note_id,
         }
-        if event.note_id and self._notes_workspace:
-            note_path = Path(self._notes_workspace) / f"{event.note_id}.md"
-            payload["note_path"] = str(note_path)
         if step is not None:
             payload["step"] = step
         return payload

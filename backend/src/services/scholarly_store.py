@@ -126,6 +126,19 @@ class ScholarlyStore:
                     content_markdown TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS paper_fulltexts (
+                    paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+                    source_type TEXT NOT NULL,
+                    source_ref TEXT,
+                    original_filename TEXT,
+                    file_path TEXT,
+                    text_path TEXT,
+                    extraction_status TEXT NOT NULL DEFAULT 'pending',
+                    text_char_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(
@@ -139,6 +152,12 @@ class ScholarlyStore:
                 table="session_papers",
                 column="origin_json",
                 definition="TEXT NOT NULL DEFAULT '[]'",
+            )
+            self._ensure_column(
+                conn,
+                table="paper_fulltexts",
+                column="text_char_count",
+                definition="INTEGER NOT NULL DEFAULT 0",
             )
 
     def create_session(self, topic: str, parent_session_id: str | None = None) -> dict[str, Any]:
@@ -340,9 +359,14 @@ class ScholarlyStore:
                 """
                 SELECT p.*, sp.rank, sp.selected, sp.relevance_score, sp.novelty_score,
                        sp.final_score, sp.relevance_label, sp.ai_reason, sp.origin_json, sp.user_status,
-                       sp.tags_json
+                       sp.tags_json, pf.source_type AS fulltext_source_type,
+                       pf.original_filename AS fulltext_original_filename,
+                       pf.extraction_status AS fulltext_extraction_status,
+                       pf.text_char_count AS fulltext_text_char_count,
+                       pf.updated_at AS fulltext_updated_at
                 FROM session_papers sp
                 JOIN papers p ON p.id = sp.paper_id
+                LEFT JOIN paper_fulltexts pf ON pf.paper_id = p.id
                 WHERE sp.session_id = ?
                 ORDER BY sp.selected DESC, sp.final_score DESC, sp.rank ASC, p.year DESC
                 """,
@@ -414,6 +438,78 @@ class ScholarlyStore:
         reports = self.list_reports(session_id)
         return reports[0] if reports else None
 
+    def get_session_paper(self, session_id: str, paper_id: str) -> dict[str, Any]:
+        paper = next(
+            (
+                item
+                for item in self.list_session_papers(session_id)
+                if item["id"] == paper_id
+            ),
+            None,
+        )
+        if paper is None:
+            raise KeyError(paper_id)
+        return paper
+
+    def get_paper_fulltext(self, paper_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as conn, conn:
+            row = conn.execute(
+                """
+                SELECT paper_id, source_type, source_ref, original_filename, file_path,
+                       text_path, extraction_status, text_char_count, created_at, updated_at
+                FROM paper_fulltexts
+                WHERE paper_id = ?
+                """,
+                (paper_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def upsert_paper_fulltext(
+        self,
+        paper_id: str,
+        *,
+        source_type: str,
+        extraction_status: str,
+        original_filename: str | None = None,
+        file_path: str | None = None,
+        text_path: str | None = None,
+        source_ref: str | None = None,
+        text_char_count: int = 0,
+    ) -> None:
+        now = utc_now()
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                """
+                INSERT INTO paper_fulltexts (
+                    paper_id, source_type, source_ref, original_filename, file_path,
+                    text_path, extraction_status, text_char_count, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(paper_id) DO UPDATE SET
+                    source_type = excluded.source_type,
+                    source_ref = excluded.source_ref,
+                    original_filename = excluded.original_filename,
+                    file_path = excluded.file_path,
+                    text_path = excluded.text_path,
+                    extraction_status = excluded.extraction_status,
+                    text_char_count = excluded.text_char_count,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    paper_id,
+                    source_type,
+                    source_ref,
+                    original_filename,
+                    file_path,
+                    text_path,
+                    extraction_status,
+                    text_char_count,
+                    now,
+                    now,
+                ),
+            )
+
     def derive_session(self, parent_session_id: str, topic: str) -> dict[str, Any]:
         self.get_session(parent_session_id)
         return self.create_session(topic, parent_session_id=parent_session_id)
@@ -467,6 +563,11 @@ class ScholarlyStore:
             "query_matches": json.loads(row["origin_json"] or "[]"),
             "user_status": row["user_status"],
             "tags": json.loads(row["tags_json"] or "[]"),
+            "fulltext_source": row["fulltext_source_type"] or None,
+            "fulltext_status": row["fulltext_extraction_status"] or "missing",
+            "fulltext_original_filename": row["fulltext_original_filename"] or None,
+            "fulltext_text_char_count": row["fulltext_text_char_count"] or 0,
+            "fulltext_updated_at": row["fulltext_updated_at"] or None,
         }
 
     @staticmethod

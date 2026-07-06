@@ -11,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
 from config import Configuration
-from services.scholarly_contracts import default_workflow_metrics
+from services.scholarly_contracts import default_llm_usage, default_workflow_metrics
 from services.scholarly_rerank import ScholarlyScreeningService
 from services.scholarly_search import ScholarlySearchService, unique_strings
 from services.scholarly_store import ScholarlyStore
@@ -38,6 +38,7 @@ class ScholarlyWorkflowState(TypedDict, total=False):
     frontier_mode: bool
     frontier_reason: str | None
     metrics: dict[str, Any]
+    llm_usage: dict[str, Any]
     events: list[dict[str, Any]]
     error: str | None
 
@@ -190,6 +191,7 @@ class ScholarlyWorkflowGraph:
             "frontier_mode": False,
             "frontier_reason": None,
             "metrics": default_workflow_metrics(),
+            "llm_usage": default_llm_usage(),
             "events": [{"type": "session_created", "session": session}],
             "error": None,
         }
@@ -203,6 +205,7 @@ class ScholarlyWorkflowGraph:
                 **state,
                 "query_tasks": query_tasks,
                 "degradation_notices": list(planner_notices),
+                "llm_usage": self.search.latest_llm_usage(),
             }
         )
         self.store.update_session(
@@ -216,6 +219,7 @@ class ScholarlyWorkflowGraph:
             "query_tasks": query_tasks,
             "planner_notices": planner_notices,
             "degradation_notices": list(planner_notices),
+            "llm_usage": self.search.latest_llm_usage(),
             "events": [
                 {
                     "type": "query_plan_generated",
@@ -598,6 +602,7 @@ class ScholarlyWorkflowGraph:
             "frontier_mode": False,
             "frontier_reason": None,
             "metrics": default_workflow_metrics(),
+            "llm_usage": default_llm_usage(),
             "events": [],
             "error": None,
         }
@@ -616,6 +621,7 @@ class ScholarlyWorkflowGraph:
             frontier_mode=bool(state.get("frontier_mode")),
             frontier_reason=state.get("frontier_reason"),
             metrics=default_workflow_metrics(state.get("metrics")),
+            llm_usage=state.get("llm_usage"),
         )
 
     @staticmethod

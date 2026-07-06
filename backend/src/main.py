@@ -77,6 +77,13 @@ class UpdateSessionPaperRequest(BaseModel):
     tags: list[str] | None = Field(default=None)
 
 
+class UploadSessionPaperPdfRequest(BaseModel):
+    """Upload a locally available PDF for one paper."""
+
+    filename: str = Field(..., min_length=1)
+    content_base64: str = Field(..., min_length=1)
+
+
 class DeriveResearchSessionRequest(BaseModel):
     """Create a child session from an existing session."""
 
@@ -172,7 +179,6 @@ def create_app() -> FastAPI:
                 "summary": item.summary,
                 "sources_summary": item.sources_summary,
                 "note_id": item.note_id,
-                "note_path": item.note_path,
             }
             for item in result.todo_items
         ]
@@ -279,6 +285,36 @@ def create_app() -> FastAPI:
                 selected=payload.selected,
                 tags=payload.tags,
             )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Paper not found") from exc
+
+    @app.post("/research/sessions/{session_id}/papers/{paper_id}/pdf")
+    def upload_research_session_paper_pdf(
+        session_id: str,
+        paper_id: str,
+        payload: UploadSessionPaperPdfRequest,
+    ) -> dict[str, Any]:
+        try:
+            return _scholarly_service().upload_paper_pdf(
+                session_id,
+                paper_id,
+                filename=payload.filename.strip(),
+                content_base64=payload.content_base64,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Paper not found") from exc
+
+    @app.post("/research/sessions/{session_id}/papers/{paper_id}/fulltext/resolve")
+    def resolve_research_session_paper_fulltext(
+        session_id: str,
+        paper_id: str,
+    ) -> dict[str, Any]:
+        try:
+            return _scholarly_service().resolve_paper_fulltext(session_id, paper_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Paper not found") from exc
 

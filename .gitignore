@@ -3,12 +3,15 @@ backend/.venv/
 backend/__pycache__/
 backend/src/__pycache__/
 backend/src/services/__pycache__/
+backend/tests/__pycache__/
 backend/*.egg-info/
 backend/src/*.egg-info/
 backend/*.log
 backend/*.sqlite3
+__pycache__/
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
 
 # Node / frontend
 frontend/node_modules/
@@ -21,8 +24,21 @@ backend/src/.env
 backend/.input
 backend/notes/
 backend/src/notes/
+backend/scholarly_artifacts/
 frontend/.env.local
 frontend/.input
+.planning/
+.agents/
+.codex/
+docs/project-roadmap-for-resume.zh-CN.md
+docs/survey.md.txt
+docs/frontend-design-handoff.zh-CN.md
+docs/frontend-design-spec.zh-CN.md
+docs/frontend-redesign-yorha-inspired.zh-CN.md
+docs/center-stage-UI-SPEC.zh-CN.md
+docs/latest-main-workbench-redesign-spec.zh-CN.md
+docs/main-workbench-ui-redesign-UI-SPEC.zh-CN.md
+参考样式/
 
 # OS / editor
 .DS_Store

@@ -490,7 +490,6 @@ class DeepResearchAgent:
             "type": "final_report",
             "report": report,
             "note_id": state.report_note_id,
-            "note_path": state.report_note_path,
         }
         yield {"type": "done"}
 
@@ -505,7 +504,7 @@ class DeepResearchAgent:
         for task in state.todo_items:
             step = channel_map.get(task.id, {}).get("step", 0)
             token = channel_map.get(task.id, {}).get("token")
-            yield {"type": "task_status", "task_id": task.id, "status": "in_progress", "title": task.title, "intent": task.intent, "note_id": task.note_id, "note_path": task.note_path, "step": step, "stream_token": token}
+            yield {"type": "task_status", "task_id": task.id, "status": "in_progress", "title": task.title, "intent": task.intent, "note_id": task.note_id, "step": step, "stream_token": token}
             try:
                 for event in self._execute_task(state, task, emit_stream=True, step=step):
                     payload = dict(event)
@@ -514,7 +513,7 @@ class DeepResearchAgent:
                     yield payload
             except Exception as exc:
                 logger.exception("Task execution failed", exc_info=exc)
-                yield {"type": "task_status", "task_id": task.id, "status": "failed", "detail": str(exc), "title": task.title, "intent": task.intent, "note_id": task.note_id, "note_path": task.note_path, "step": step, "stream_token": token}
+                yield {"type": "task_status", "task_id": task.id, "status": "failed", "detail": str(exc), "title": task.title, "intent": task.intent, "note_id": task.note_id, "step": step, "stream_token": token}
 
     def _execute_task(
         self,
@@ -563,7 +562,6 @@ class DeepResearchAgent:
                     "title": task.title,
                     "intent": task.intent,
                     "note_id": task.note_id,
-                    "note_path": task.note_path,
                     "step": step,
                 }
             else:
@@ -599,7 +597,6 @@ class DeepResearchAgent:
                 "step": step,
                 "backend": backend,
                 "note_id": task.note_id,
-                "note_path": task.note_path,
             }
 
             summary_stream, summary_getter = self.summarizer.stream_task_summary(state, task, context)
@@ -636,7 +633,6 @@ class DeepResearchAgent:
                 "summary": task.summary,
                 "sources_summary": task.sources_summary,
                 "note_id": task.note_id,
-                "note_path": task.note_path,
                 "step": step,
             }
         else:
@@ -670,7 +666,6 @@ class DeepResearchAgent:
             "summary": task.summary,
             "sources_summary": task.sources_summary,
             "note_id": task.note_id,
-            "note_path": task.note_path,
             "stream_token": task.stream_token,
         }
 
@@ -727,8 +722,6 @@ class DeepResearchAgent:
             "title": note_title,
             "content": content,
         }
-        if note_path:
-            payload["note_path"] = str(note_path)
 
         return payload
 

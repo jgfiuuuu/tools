@@ -220,7 +220,7 @@
               {{ item }}
             </span>
           </div>
-          <p v-else class="muted">选择或创建一个调研会话，主舞台只保留论文工作台。</p>
+          <p v-else class="muted">选择或创建一个调研会话，从这里开始整理论文、证据和报告。</p>
         </div>
       </header>
 
@@ -485,13 +485,22 @@
 
                   <div class="detail-actions">
                     <a
-                      v-if="resolvePaperLink(paper)"
+                      v-if="resolvePaperSourceLink(paper)"
                       class="primary-link"
-                      :href="resolvePaperLink(paper) || undefined"
+                      :href="resolvePaperSourceLink(paper) || undefined"
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      打开论文
+                      来源页
+                    </a>
+                    <a
+                      v-if="resolvePaperPdfLink(paper)"
+                      class="secondary-link"
+                      :href="resolvePaperPdfLink(paper) || undefined"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      原文 PDF
                     </a>
                     <a
                       v-if="currentSession"
@@ -518,6 +527,56 @@
                   <div class="ai-note">
                     <span class="ai-note-label">AI 判断</span>
                     <p>{{ paper.ai_reason }}</p>
+                  </div>
+                </section>
+
+                <section class="detail-block">
+                  <div class="section-title detail-section-title">
+                    <h3>全文证据</h3>
+                    <span class="memo-badge">{{ paperFulltextBadge(paper) }}</span>
+                  </div>
+                  <div class="cite-box">
+                    <p class="cite-text">{{ paperFulltextDescription(paper) }}</p>
+                    <div v-if="paper.fulltext_original_filename || paper.fulltext_updated_at" class="detail-meta-line">
+                      <span v-if="paper.fulltext_original_filename">{{ paper.fulltext_original_filename }}</span>
+                      <span v-if="paper.fulltext_updated_at">{{ formatDate(paper.fulltext_updated_at) }}</span>
+                    </div>
+                    <div class="cite-actions">
+                      <button
+                        v-if="shouldShowResolveFulltextAction(paper)"
+                        class="secondary-link"
+                        type="button"
+                        :disabled="paperActionPending(paper.id)"
+                        @click="resolvePaperFulltextForUser(paper)"
+                      >
+                        {{
+                          resolvingPaperId === paper.id
+                            ? "获取中..."
+                            : paper.fulltext_status === "parse_failed"
+                              ? "改用开放全文"
+                              : "获取开放全文"
+                        }}
+                      </button>
+                      <label
+                        class="secondary-link upload-link"
+                        :class="{ disabled: paperActionPending(paper.id) }"
+                      >
+                        <input
+                          class="hidden-file-input"
+                          type="file"
+                          accept="application/pdf"
+                          :disabled="paperActionPending(paper.id)"
+                          @change="handlePaperPdfSelected(paper, $event)"
+                        />
+                        {{
+                          uploadingPaperId === paper.id
+                            ? "上传中..."
+                            : paper.fulltext_source === "uploaded_pdf"
+                              ? "替换 PDF"
+                              : "上传 PDF"
+                        }}
+                      </label>
+                    </div>
                   </div>
                 </section>
 
@@ -623,7 +682,7 @@
 
         <div v-else class="empty-state">
           <p>先创建一个调研会话。</p>
-          <p class="muted">主舞台会把检索、筛选、精读和报告都收拢到同一个工作台里。</p>
+          <p class="muted">检索结果、筛选判断、精读记录和最终报告都会汇集在这里。</p>
         </div>
       </section>
 
@@ -656,9 +715,9 @@
               </button>
 
               <div class="report-drawer-copy">
-                <p class="eyebrow">Report Mode</p>
+                <p class="eyebrow">研究备忘录</p>
                 <h2>{{ currentSession?.topic || "研究报告" }}</h2>
-                <p class="muted">&#x8986;&#x76d6;&#x4e2d;&#x592e;&#x5de5;&#x4f5c;&#x53f0;&#x7684;&#x62a5;&#x544a;&#x9605;&#x8bfb;&#x6a21;&#x5f0f;</p>
+                <p class="muted">围绕当前纳入论文整理判断、证据与下一步方向。</p>
               </div>
 
               <div class="report-drawer-actions">
@@ -682,25 +741,62 @@
               </div>
             </header>
 
-            <section ref="reportScrollRef" class="report-body">
+            <section ref="reportScrollRef" class="report-body" @scroll="handleReportScroll">
               <div class="report-hero">
                 <div class="report-heading">
-                  <p class="eyebrow">Research Report</p>
+                  <p class="eyebrow">研究报告</p>
                   <h2>{{ reportHeading }}</h2>
                   <p class="muted report-summary">基于当前已确认文献的研究备忘录</p>
                 </div>
-                <span v-if="confirmedCount" class="memo-badge">{{ confirmedCount }} 篇已确认</span>
+                <span v-if="confirmedCount" class="memo-badge">{{ confirmedCount }} 篇纳入证据</span>
               </div>
 
-              <template v-if="reportSections.length">
-                <nav class="report-toc">
+              <div v-if="reportSummaryChips.length" class="report-summary-strip">
+                <div
+                  v-for="chip in reportSummaryChips"
+                  :key="chip.id"
+                  class="report-summary-chip"
+                >
+                  <span>{{ chip.label }}</span>
+                  <strong>{{ chip.value }}</strong>
+                </div>
+                <button
+                  v-if="canToggleRawReport"
+                  class="ghost-btn report-raw-toggle"
+                  type="button"
+                  @click="showRawReport = !showRawReport"
+                >
+                  {{ showRawReport ? "隐藏原始 Markdown" : "查看原始 Markdown" }}
+                </button>
+              </div>
+
+              <pre
+                v-if="showRawReport && currentReportMarkdown"
+                class="report-draft report-draft-inline"
+              >{{ currentReportMarkdown }}</pre>
+
+              <template v-else-if="reportSections.length">
+                <nav class="report-toc" aria-label="鎶ュ憡鐩綍">
                   <button
                     v-for="section in reportSections"
                     :key="section.id"
+                    :class="{ active: activeReportSectionId === section.id }"
                     type="button"
+                    :aria-label="section.title"
                     @click="scrollReportTo(section.id)"
                   >
-                    {{ section.title }}
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        :d="reportSectionIconPath(section.icon)"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.8"
+                      />
+                    </svg>
+                    <span class="report-toc-tooltip">{{ section.title }}</span>
+                    <span class="sr-only">{{ section.title }}</span>
                   </button>
                 </nav>
 
@@ -711,8 +807,30 @@
                     :key="section.id"
                     :data-section-id="section.id"
                     class="report-section"
+                    :class="{ appendix: section.appendix }"
                   >
-                    <h3>{{ section.title }}</h3>
+                    <div class="report-section-head">
+                      <div class="report-section-title">
+                        <span class="report-section-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24">
+                            <path
+                              :d="reportSectionIconPath(section.icon)"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.8"
+                            />
+                          </svg>
+                        </span>
+                        <div>
+                          <h3>{{ section.title }}</h3>
+                          <p v-if="section.summary" class="muted report-section-summary">
+                            {{ section.summary }}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                     <div class="report-items">
                       <div
                         v-for="(item, index) in section.items"
@@ -729,6 +847,33 @@
                         <p>{{ item.text }}</p>
                       </div>
                     </div>
+                    <div
+                      v-if="section.evidenceCards.length"
+                      class="report-evidence-strip"
+                    >
+                      <article
+                        v-for="card in section.evidenceCards"
+                        :key="`${section.id}-${card.paperId}`"
+                        class="evidence-card"
+                      >
+                        <div class="evidence-card-head">
+                          <h4>{{ card.title }}</h4>
+                          <div class="evidence-card-badges">
+                            <span class="label-chip">{{ fitTierLabel(card.fitTier) }}</span>
+                            <span class="label-chip">{{ evidenceLevelLabel(card.evidenceLevel) }}</span>
+                          </div>
+                        </div>
+                        <p class="evidence-card-meta">
+                          {{ [card.taskFamily, card.conditioningFamily, card.predictionFamily].filter(Boolean).join(" | ") }}
+                        </p>
+                        <p v-if="card.keyClaims[0]" class="evidence-card-copy">
+                          {{ card.keyClaims[0] }}
+                        </p>
+                        <p v-if="card.limitations[0]" class="evidence-card-copy muted">
+                          {{ card.limitations[0] }}
+                        </p>
+                      </article>
+                    </div>
                   </section>
                 </article>
               </template>
@@ -737,7 +882,7 @@
 
               <div v-else-if="reporting" class="empty-state inset">
                 <p>正在生成报告草稿。</p>
-                <p class="muted">SSE 流会把内容逐段写入这个抽屉，列表上下文不会丢失。</p>
+                <p class="muted">生成中的内容会逐段出现在这里，你可以继续查看论文列表和上下文。</p>
               </div>
 
               <div v-else class="empty-state inset">
@@ -799,7 +944,19 @@ import {
   generateReportStream,
   getSession,
   listSessions,
+  resolvePaperFulltext,
+  uploadPaperPdf,
   updateSessionPaper,
+  type LlmUsageSummary,
+  type ReportArtifacts,
+  type ReportContext,
+  type ReportEvidenceBuckets,
+  type ReportFitTier,
+  type ReportItemKind,
+  type ReportMemoEvidenceCard,
+  type ReportMemoSection,
+  type ReportReviewSection,
+  type ReportTone,
   type ResearchQueryTask,
   type ResearchReport,
   type ResearchSession,
@@ -811,8 +968,6 @@ import {
 
 type WorkspaceMode = "papers" | "report";
 type LeftRailSection = "research" | "history" | "logs";
-type ReportTone = "evidence" | "judgment" | "speculation" | "action" | "note";
-type ReportItemKind = "paragraph" | "bullet" | "ordered";
 type MetricRingTone = "warning" | "success" | "neutral";
 
 interface ReportItem {
@@ -822,10 +977,27 @@ interface ReportItem {
   tone?: ReportTone;
 }
 
+interface ReportEvidenceCardPreview {
+  paperId: string;
+  title: string;
+  fitTier: ReportFitTier;
+  evidenceLevel: string;
+  taskFamily: string;
+  modalityFamily: string;
+  conditioningFamily: string;
+  predictionFamily: string;
+  keyClaims: string[];
+  limitations: string[];
+}
+
 interface ReportSection {
   id: string;
   title: string;
+  icon?: string;
+  summary?: string;
   items: ReportItem[];
+  evidenceCards: ReportEvidenceCardPreview[];
+  appendix?: boolean;
 }
 
 interface MetricRing {
@@ -851,6 +1023,7 @@ const deriveTopic = ref("");
 const progressLogs = ref<string[]>([]);
 const error = ref("");
 const creating = ref(false);
+const showRawReport = ref(false);
 const reporting = ref(false);
 const reportText = ref("");
 const showAllLogs = ref(false);
@@ -859,6 +1032,9 @@ const runtimeTrayOpen = ref(readStoredBoolean(RUNTIME_TRAY_KEY, false));
 const savedPaperListScrollTop = ref(0);
 const deleteTargetSession = ref<ResearchSession | null>(null);
 const deletingSessionId = ref<string | null>(null);
+const uploadingPaperId = ref<string | null>(null);
+const resolvingPaperId = ref<string | null>(null);
+const activeReportSectionId = ref("");
 
 const filters = reactive({
   keyword: "",
@@ -887,6 +1063,9 @@ const queryTasks = computed(() =>
 const sessionMetadata = computed<SessionMetadata>(() =>
   normalizeSessionMetadata(currentSession.value?.metadata)
 );
+const llmUsage = computed<LlmUsageSummary>(() =>
+  normalizeLlmUsage(sessionMetadata.value.llm_usage as LlmUsageSummary | undefined)
+);
 const sessionMetrics = computed<SessionMetrics>(() =>
   normalizeSessionMetrics(
     currentSession.value?.metrics ?? sessionMetadata.value.metrics
@@ -904,19 +1083,123 @@ const confirmedCount = computed(
       (paper) => paper.selected && paper.user_status !== "excluded"
     ).length
 );
+const reportScopePapers = computed(() =>
+  papers.value.filter((paper) => paper.selected && paper.user_status !== "excluded")
+);
+const liveFulltextCount = computed(() =>
+  reportScopePapers.value.filter(
+    (paper) =>
+      paper.fulltext_status === "completed" &&
+      Boolean(paper.fulltext_source) &&
+      paper.fulltext_source !== "abstract_only"
+  ).length
+);
+const liveUploadedPdfCount = computed(() =>
+  reportScopePapers.value.filter(
+    (paper) =>
+      paper.fulltext_status === "completed" && paper.fulltext_source === "uploaded_pdf"
+  ).length
+);
+const liveOpenFulltextCount = computed(() =>
+  reportScopePapers.value.filter(
+    (paper) =>
+      paper.fulltext_status === "completed" &&
+      Boolean(paper.fulltext_source) &&
+      paper.fulltext_source !== "uploaded_pdf" &&
+      paper.fulltext_source !== "abstract_only"
+  ).length
+);
 const activePaper = computed(() => {
   if (!papers.value.length || !activePaperId.value) {
     return null;
   }
   return papers.value.find((paper) => paper.id === activePaperId.value) ?? null;
 });
+const reportContext = computed<ReportContext>(() =>
+  normalizeReportContext(sessionMetadata.value.report_context as ReportContext | undefined)
+);
+const reportArtifacts = computed<ReportArtifacts>(() =>
+  normalizeReportArtifacts(sessionMetadata.value.report_artifacts as ReportArtifacts | undefined)
+);
+const reportEvidenceBuckets = computed<ReportEvidenceBuckets>(() =>
+  normalizeReportEvidenceBuckets(reportArtifacts.value.evidence_buckets)
+);
 const currentReportMarkdown = computed(
   () => reportText.value || latestReport.value?.content_markdown || ""
 );
 const hasReportContent = computed(() => Boolean(currentReportMarkdown.value.trim()));
 const parsedReport = computed(() => parseReportMarkdown(currentReportMarkdown.value));
 const reportHeading = computed(() => parsedReport.value.title || "研究报告");
-const reportSections = computed(() => parsedReport.value.sections);
+const reviewReportSections = computed(() =>
+  normalizeReviewSections(
+    reportArtifacts.value.review_sections,
+    reportArtifacts.value.paper_cards
+  )
+);
+const legacyMemoSections = computed(() =>
+  normalizeMemoSections(
+    reportArtifacts.value.memo_sections,
+    reportArtifacts.value.paper_cards
+  )
+);
+const reportSections = computed(() => {
+  if (reporting.value && reportText.value.trim()) {
+    return parsedReport.value.sections;
+  }
+  if (reviewReportSections.value.length) {
+    return reviewReportSections.value;
+  }
+  if (parsedReport.value.sections.length) {
+    return parsedReport.value.sections;
+  }
+  return legacyMemoSections.value;
+});
+const canToggleRawReport = computed(
+  () => reviewReportSections.value.length > 0 && Boolean(currentReportMarkdown.value.trim())
+);
+const reportSummaryChips = computed(() => {
+  const bucketCounts = reportContext.value.evidence_bucket_counts ?? {};
+  const coreCount = bucketCounts.core ?? reportEvidenceBuckets.value.core.length;
+  const adjacentCount =
+    bucketCounts.adjacent_transfer ?? reportEvidenceBuckets.value.adjacent_transfer.length;
+  return [
+    {
+      id: "confirmed",
+      label: "已确认",
+      value: String(confirmedCount.value)
+    },
+    {
+      id: "fulltext",
+      label: "正文级",
+      value: String(liveFulltextCount.value)
+    },
+    {
+      id: "open",
+      label: "开放全文",
+      value: String(liveOpenFulltextCount.value)
+    },
+    {
+      id: "uploaded",
+      label: "已上传 PDF",
+      value: String(liveUploadedPdfCount.value)
+    },
+    {
+      id: "core",
+      label: "核心",
+      value: String(coreCount)
+    },
+    {
+      id: "adjacent",
+      label: "邻近",
+      value: String(adjacentCount)
+    },
+    {
+      id: "synthesis",
+      label: "合成",
+      value: reportContext.value.synthesis_mode === "llm" ? "LLM" : "回退"
+    }
+  ];
+});
 const currentSessionShortTitle = computed(() => {
   if (!currentSession.value) {
     return "选择或创建调研会话";
@@ -1105,9 +1388,14 @@ const metricRings = computed<MetricRing[]>(() => {
   }
   const metrics = sessionMetrics.value;
   const health = sourceHealthCounts.value;
+  const usage = llmUsage.value;
   const rawCount = Math.max(metrics.raw_paper_count ?? 0, 1);
   const finalCount = metrics.final_candidate_count ?? 0;
   const totalSources = Math.max(health.total, 1);
+  const totalTokens = usage.total_tokens ?? 0;
+  const screeningTokens = usage.by_stage?.screening?.total_tokens ?? 0;
+  const extractionTokens = usage.by_stage?.paper_card_extraction?.total_tokens ?? 0;
+  const synthesisTokens = usage.by_stage?.report_synthesis?.total_tokens ?? 0;
 
   return [
     {
@@ -1136,6 +1424,20 @@ const metricRings = computed<MetricRing[]>(() => {
       detail: [sourceHealthText.value, sourceHealthDetailText.value].filter(Boolean).join("\n"),
       progress: Math.max(14, Math.min(100, Math.round((health.healthy / totalSources) * 100))),
       tone: "success"
+    },
+    {
+      id: "tokens",
+      label: "Tokens",
+      value: formatTokenCompact(totalTokens),
+      caption: `in ${formatTokenCompact(usage.input_tokens ?? 0)} · out ${formatTokenCompact(usage.output_tokens ?? 0)}`,
+      detail: [
+        `Total ${totalTokens}`,
+        `screening ${screeningTokens}`,
+        `cards ${extractionTokens}`,
+        `report ${synthesisTokens}`
+      ].join(" | "),
+      progress: Math.max(12, Math.min(100, Math.round((Math.log10(totalTokens + 10) / 5) * 100))),
+      tone: totalTokens > 0 ? "warning" : "neutral"
     }
   ];
 });
@@ -1185,6 +1487,7 @@ watch(hasRuntimeDetails, (value) => {
 watch(
   currentSession,
   (session) => {
+    showRawReport.value = false;
     if (typeof document !== "undefined") {
       document.title = session ? `${session.topic} · ${APP_TITLE}` : APP_TITLE;
     }
@@ -1197,6 +1500,18 @@ watch(activePaperId, (paperId, previousId) => {
   }
   deriveTopic.value = "";
   void nextTick(() => scrollExpandedPaperIntoView(paperId));
+});
+watch(
+  reportSections,
+  (sections) => {
+    activeReportSectionId.value = sections[0]?.id ?? "";
+  },
+  { immediate: true }
+);
+watch(canToggleRawReport, (value) => {
+  if (!value) {
+    showRawReport.value = false;
+  }
 });
 
 onMounted(async () => {
@@ -1436,15 +1751,92 @@ async function patchPaper(
 
   try {
     const updated = await updateSessionPaper(currentSession.value.id, paper.id, payload);
-    const index = papers.value.findIndex((item) => item.id === updated.id);
-    if (index >= 0 && currentSession.value.papers) {
-      currentSession.value.papers[index] = normalizePaper(updated);
-      syncCurrentSessionCounters();
-      syncSessionListSummary();
-    }
+    applyUpdatedPaper(updated);
   } catch (err) {
     error.value = err instanceof Error ? err.message : "更新论文状态失败";
   }
+}
+
+function applyUpdatedPaper(updated: ScholarlyPaper) {
+  const index = papers.value.findIndex((item) => item.id === updated.id);
+  if (index >= 0 && currentSession.value?.papers) {
+    currentSession.value.papers[index] = normalizePaper(updated);
+    syncCurrentSessionCounters();
+    syncSessionListSummary();
+  }
+}
+
+function paperActionPending(paperId: string) {
+  return uploadingPaperId.value === paperId || resolvingPaperId.value === paperId;
+}
+
+async function handlePaperPdfSelected(paper: ScholarlyPaper, event: Event) {
+  if (!currentSession.value) {
+    return;
+  }
+  const input = event.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) {
+    return;
+  }
+  if (paperActionPending(paper.id)) {
+    input.value = "";
+    return;
+  }
+  if (file.type && file.type !== "application/pdf") {
+    error.value = "只支持上传 PDF 文件。";
+    input.value = "";
+    return;
+  }
+
+  uploadingPaperId.value = paper.id;
+  error.value = "";
+  try {
+    const contentBase64 = await fileToBase64(file);
+    const updated = await uploadPaperPdf(currentSession.value.id, paper.id, {
+      filename: file.name,
+      content_base64: contentBase64
+    });
+    applyUpdatedPaper(updated);
+    pushLog(`已上传全文 PDF：${file.name}`);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "上传 PDF 失败";
+  } finally {
+    uploadingPaperId.value = null;
+    if (input) {
+      input.value = "";
+    }
+  }
+}
+
+async function resolvePaperFulltextForUser(paper: ScholarlyPaper) {
+  if (!currentSession.value || paperActionPending(paper.id)) {
+    return;
+  }
+
+  resolvingPaperId.value = paper.id;
+  error.value = "";
+  try {
+    const updated = await resolvePaperFulltext(currentSession.value.id, paper.id);
+    applyUpdatedPaper(updated);
+    pushLog(`已获取开放全文：${paper.title}`);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "获取开放全文失败";
+  } finally {
+    resolvingPaperId.value = null;
+  }
+}
+
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const slice = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
 }
 
 async function generateReport() {
@@ -1617,6 +2009,7 @@ function scrollReportTo(sectionId: string) {
   if (!container) {
     return;
   }
+  activeReportSectionId.value = sectionId;
   const target = container.querySelector<HTMLElement>(
     `[data-section-id="${sectionId}"]`
   );
@@ -1627,8 +2020,33 @@ function scrollReportTo(sectionId: string) {
 
 function scrollReportToTop() {
   void nextTick(() => {
+    activeReportSectionId.value = reportSections.value[0]?.id ?? "";
     reportScrollRef.value?.scrollTo({ top: 0, behavior: "auto" });
   });
+}
+
+function handleReportScroll() {
+  const container = reportScrollRef.value;
+  if (!container) {
+    return;
+  }
+  const sections = Array.from(
+    container.querySelectorAll<HTMLElement>("[data-section-id]")
+  );
+  if (!sections.length) {
+    activeReportSectionId.value = "";
+    return;
+  }
+  const threshold = container.scrollTop + 40;
+  let currentId = sections[0].dataset.sectionId || sections[0].id;
+  for (const section of sections) {
+    if (section.offsetTop <= threshold) {
+      currentId = section.dataset.sectionId || section.id;
+    } else {
+      break;
+    }
+  }
+  activeReportSectionId.value = currentId;
 }
 
 function pushLog(message: string) {
@@ -1673,14 +2091,49 @@ function compactAuthors(authors: string[]) {
   return `${authors.slice(0, 3).join(", ")} et al.`;
 }
 
-function resolvePaperLink(paper: ScholarlyPaper) {
+function resolvePaperSourceLink(paper: ScholarlyPaper) {
   if (paper.url) {
     return paper.url;
   }
   if (paper.doi) {
     return `https://doi.org/${paper.doi}`;
   }
+  return null;
+}
+
+function resolvePaperPdfLink(paper: ScholarlyPaper) {
   return paper.pdf_url;
+}
+
+function hasOpenAccessCandidate(paper: ScholarlyPaper) {
+  return Boolean(paper.arxiv_id || paper.url || paper.pdf_url);
+}
+
+function shouldShowResolveFulltextAction(paper: ScholarlyPaper) {
+  if (!hasOpenAccessCandidate(paper)) {
+    return false;
+  }
+  if (paper.fulltext_source === "uploaded_pdf" && paper.fulltext_status === "completed") {
+    return false;
+  }
+  return paper.fulltext_status !== "completed";
+}
+
+function fulltextSourceLabel(source: string | null) {
+  switch (source) {
+    case "uploaded_pdf":
+      return "已上传 PDF";
+    case "open_pdf":
+      return "开放 PDF";
+    case "arxiv_html":
+      return "arXiv 正文";
+    case "open_web":
+      return "网页正文";
+    case "abstract_only":
+      return "仅摘要";
+    default:
+      return source || "未获取全文";
+  }
 }
 
 function buildCitationText(paper: ScholarlyPaper) {
@@ -1689,6 +2142,46 @@ function buildCitationText(paper: ScholarlyPaper) {
   const venue = paper.venue ? ` ${paper.venue}.` : "";
   const doi = paper.doi ? ` DOI: ${paper.doi}.` : "";
   return `${authors} (${year}). ${paper.title}.${venue}${doi}`.trim();
+}
+
+function paperFulltextBadge(paper: ScholarlyPaper) {
+  if (paper.fulltext_source === "uploaded_pdf" && paper.fulltext_status === "completed") {
+    return "已上传 PDF";
+  }
+  if (paper.fulltext_status === "completed" && paper.fulltext_source) {
+    return fulltextSourceLabel(paper.fulltext_source);
+  }
+  if (paper.fulltext_status === "parse_failed") {
+    return "上传 PDF 解析失败";
+  }
+  return "仅摘要";
+}
+
+function paperFulltextDescription(paper: ScholarlyPaper) {
+  if (paper.fulltext_source === "uploaded_pdf" && paper.fulltext_status === "completed") {
+    return `当前会优先使用你上传的 PDF，已提取约 ${paper.fulltext_text_char_count} 字符的正文。`;
+  }
+  if (paper.fulltext_status === "completed" && paper.fulltext_source) {
+    return `当前已缓存${fulltextSourceLabel(paper.fulltext_source)}，生成报告时会优先使用正文级证据；如果你有授权 PDF，也可以再上传覆盖。`;
+  }
+  if (paper.fulltext_status === "parse_failed") {
+    return hasOpenAccessCandidate(paper)
+      ? "你上传的 PDF 暂未解析成功。现在可以改用开放全文，或者重新上传一份更清晰的 PDF。"
+      : "你上传的 PDF 暂未解析成功。可以重新上传一份更清晰的 PDF。";
+  }
+  return hasOpenAccessCandidate(paper)
+    ? "系统会优先尝试公开可用的原文 PDF 或网页正文；如果你手头有授权 PDF，也可以上传后优先使用。"
+    : "当前还没有可用的正文级缓存。你可以上传自己有权限获取的 PDF。";
+}
+
+function formatTokenCompact(value: number) {
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}m`;
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  }
+  return String(value);
 }
 
 async function copyText(value: string) {
@@ -1725,6 +2218,19 @@ function normalizePaper(paper: ScholarlyPaper): ScholarlyPaper {
     ...paper,
     authors: Array.isArray(paper.authors) ? paper.authors : [],
     tags: Array.isArray(paper.tags) ? paper.tags : [],
+    fulltext_source: typeof paper.fulltext_source === "string" ? paper.fulltext_source : null,
+    fulltext_status:
+      typeof paper.fulltext_status === "string" ? paper.fulltext_status : "missing",
+    fulltext_original_filename:
+      typeof paper.fulltext_original_filename === "string"
+        ? paper.fulltext_original_filename
+        : null,
+    fulltext_text_char_count:
+      typeof paper.fulltext_text_char_count === "number"
+        ? paper.fulltext_text_char_count
+        : 0,
+    fulltext_updated_at:
+      typeof paper.fulltext_updated_at === "string" ? paper.fulltext_updated_at : null,
     query_matches: Array.isArray(paper.query_matches)
       ? paper.query_matches.map((match) => ({
           ...match,
@@ -1838,7 +2344,292 @@ function normalizeSessionMetadata(
       metadata?.source_contributions &&
       typeof metadata.source_contributions === "object"
         ? metadata.source_contributions
+        : {},
+    llm_usage: normalizeLlmUsage(metadata?.llm_usage as LlmUsageSummary | undefined),
+    report_context: normalizeReportContext(metadata?.report_context as ReportContext | undefined),
+    report_artifacts: normalizeReportArtifacts(
+      metadata?.report_artifacts as ReportArtifacts | undefined
+    )
+  };
+}
+
+function normalizeReportContext(
+  context: ReportContext | undefined
+): ReportContext {
+  return {
+    ...(context ?? {}),
+    evidence_count:
+      typeof context?.evidence_count === "number" ? context.evidence_count : 0,
+    evidence_limit:
+      typeof context?.evidence_limit === "number" ? context.evidence_limit : 0,
+    evidence_limited: Boolean(context?.evidence_limited),
+    year_range:
+      context?.year_range && typeof context.year_range === "object"
+        ? {
+            start:
+              typeof context.year_range.start === "number"
+                ? context.year_range.start
+                : null,
+            end:
+              typeof context.year_range.end === "number" ? context.year_range.end : null
+          }
+        : { start: null, end: null },
+    year_range_text:
+      typeof context?.year_range_text === "string" ? context.year_range_text : "",
+    main_sources: Array.isArray(context?.main_sources) ? context.main_sources : [],
+    main_sources_text:
+      typeof context?.main_sources_text === "string" ? context.main_sources_text : "",
+    query_summary:
+      typeof context?.query_summary === "string" ? context.query_summary : "",
+    fulltext_count:
+      typeof context?.fulltext_count === "number" ? context.fulltext_count : 0,
+    abstract_only_count:
+      typeof context?.abstract_only_count === "number" ? context.abstract_only_count : 0,
+    uploaded_pdf_count:
+      typeof context?.uploaded_pdf_count === "number" ? context.uploaded_pdf_count : 0,
+    evidence_mix:
+      context?.evidence_mix && typeof context.evidence_mix === "object"
+        ? context.evidence_mix
+        : {},
+    topic_boundary:
+      typeof context?.topic_boundary === "string" ? context.topic_boundary : "",
+    topic_axes: Array.isArray(context?.topic_axes) ? context.topic_axes : [],
+    synthesis_mode:
+      typeof context?.synthesis_mode === "string" ? context.synthesis_mode : "fallback",
+    evidence_bucket_counts:
+      context?.evidence_bucket_counts &&
+      typeof context.evidence_bucket_counts === "object"
+        ? context.evidence_bucket_counts
         : {}
+  };
+}
+
+function normalizeReportArtifacts(
+  artifacts: ReportArtifacts | undefined
+): ReportArtifacts {
+  return {
+    tasks: Array.isArray(artifacts?.tasks) ? artifacts?.tasks : [],
+    supporting_notes: Array.isArray(artifacts?.supporting_notes)
+      ? artifacts?.supporting_notes
+      : [],
+    paper_cards: Array.isArray(artifacts?.paper_cards)
+      ? artifacts?.paper_cards.map(normalizeReportPaperCard)
+      : [],
+    memo_sections: Array.isArray(artifacts?.memo_sections) ? artifacts?.memo_sections : [],
+    review_sections: Array.isArray(artifacts?.review_sections)
+      ? artifacts?.review_sections
+      : [],
+    section_generation: Array.isArray(artifacts?.section_generation)
+      ? artifacts?.section_generation
+      : [],
+    evidence_buckets: normalizeReportEvidenceBuckets(artifacts?.evidence_buckets)
+  };
+}
+
+function normalizeReportEvidenceBuckets(
+  buckets: ReportEvidenceBuckets | undefined
+): ReportEvidenceBuckets {
+  return {
+    core: Array.isArray(buckets?.core) ? buckets.core : [],
+    adjacent_transfer: Array.isArray(buckets?.adjacent_transfer)
+      ? buckets.adjacent_transfer
+      : [],
+    off_target: Array.isArray(buckets?.off_target) ? buckets.off_target : []
+  };
+}
+
+function normalizeReportPaperCard(
+  card: NonNullable<ReportArtifacts["paper_cards"]>[number]
+) {
+  return {
+    ...card,
+    key_claims: Array.isArray(card?.key_claims) ? card.key_claims : [],
+    evidence: Array.isArray(card?.evidence) ? card.evidence : [],
+    datasets_metrics: Array.isArray(card?.datasets_metrics) ? card.datasets_metrics : [],
+    limitations: Array.isArray(card?.limitations) ? card.limitations : [],
+    open_questions: Array.isArray(card?.open_questions) ? card.open_questions : [],
+    source_excerpt_refs: Array.isArray(card?.source_excerpt_refs) ? card.source_excerpt_refs : []
+  };
+}
+
+function normalizeMemoSections(
+  sections: ReportMemoSection[] | undefined,
+  paperCards: ReportArtifacts["paper_cards"] | undefined
+): ReportSection[] {
+  if (!Array.isArray(sections) || !sections.length) {
+    return [];
+  }
+  const cardMap = new Map(
+    (paperCards ?? []).map((card) => [card.paper_id, normalizeReportPaperCard(card)])
+  );
+  return sections.map((section, index) => {
+    const evidenceCards = Array.isArray(section?.evidence_cards)
+      ? section.evidence_cards
+          .map((card) => normalizeMemoEvidenceCard(card, cardMap))
+          .filter(Boolean) as ReportEvidenceCardPreview[]
+      : [];
+    return {
+      id:
+        typeof section?.id === "string" && section.id
+          ? section.id
+          : makeSectionId(section?.title || `section-${index}`, index),
+      title: typeof section?.title === "string" ? section.title : `Section ${index + 1}`,
+      icon: typeof section?.icon === "string" ? section.icon : "book",
+      summary: typeof section?.summary === "string" ? section.summary : "",
+      items: Array.isArray(section?.items)
+        ? section.items.map((item) => ({
+            kind:
+              item?.kind === "ordered" || item?.kind === "paragraph" ? item.kind : "bullet",
+            text: typeof item?.text === "string" ? item.text : "",
+            order: typeof item?.order === "string" ? item.order : undefined,
+            tone:
+              item?.tone === "evidence" ||
+              item?.tone === "judgment" ||
+              item?.tone === "speculation" ||
+              item?.tone === "action" ||
+              item?.tone === "note"
+                ? item.tone
+                : undefined
+          }))
+        : [],
+      evidenceCards,
+      appendix: Boolean(section?.appendix)
+    };
+  });
+}
+
+function normalizeReviewSections(
+  sections: ReportReviewSection[] | undefined,
+  paperCards: ReportArtifacts["paper_cards"] | undefined
+): ReportSection[] {
+  if (!Array.isArray(sections) || !sections.length) {
+    return [];
+  }
+  const cardMap = new Map(
+    (paperCards ?? []).map((card) => [card.paper_id, normalizeReportPaperCard(card)])
+  );
+  return sections.map((section, index) => {
+    const evidenceCards = Array.isArray(section?.evidence_cards)
+      ? section.evidence_cards
+          .map((card) => normalizeMemoEvidenceCard(card, cardMap))
+          .filter(Boolean) as ReportEvidenceCardPreview[]
+      : [];
+    const items: ReportItem[] = [];
+    for (const paragraph of Array.isArray(section?.narrative_paragraphs)
+      ? section.narrative_paragraphs
+      : []) {
+      if (typeof paragraph !== "string" || !paragraph.trim()) {
+        continue;
+      }
+      items.push({
+        kind: "paragraph",
+        text: paragraph.trim()
+      });
+    }
+    for (const insight of Array.isArray(section?.insight_items) ? section.insight_items : []) {
+      items.push({
+        kind:
+          insight?.kind === "ordered" || insight?.kind === "paragraph"
+            ? insight.kind
+            : "bullet",
+        text: typeof insight?.text === "string" ? insight.text : "",
+        order: typeof insight?.order === "string" ? insight.order : undefined,
+        tone:
+          insight?.tone === "evidence" ||
+          insight?.tone === "judgment" ||
+          insight?.tone === "speculation" ||
+          insight?.tone === "action" ||
+          insight?.tone === "note"
+            ? insight.tone
+            : undefined
+      });
+    }
+    return {
+      id:
+        typeof section?.id === "string" && section.id
+          ? section.id
+          : makeSectionId(section?.title || `section-${index}`, index),
+      title: typeof section?.title === "string" ? section.title : `Section ${index + 1}`,
+      icon: typeof section?.icon === "string" ? section.icon : "book",
+      summary: typeof section?.summary === "string" ? section.summary : "",
+      items,
+      evidenceCards,
+      appendix: Boolean(section?.appendix)
+    };
+  });
+}
+
+function normalizeMemoEvidenceCard(
+  card: ReportMemoEvidenceCard | undefined,
+  cardMap: Map<string, ReturnType<typeof normalizeReportPaperCard>>
+): ReportEvidenceCardPreview | null {
+  if (!card || typeof card !== "object") {
+    return null;
+  }
+  const fallback = typeof card.paper_id === "string" ? cardMap.get(card.paper_id) : undefined;
+  return {
+    paperId:
+      typeof card.paper_id === "string" ? card.paper_id : fallback?.paper_id || "",
+    title: typeof card.title === "string" ? card.title : fallback?.title || "Untitled",
+    fitTier:
+      card.fit_tier === "core" ||
+      card.fit_tier === "adjacent_transfer" ||
+      card.fit_tier === "off_target"
+        ? card.fit_tier
+        : fallback?.fit_tier || "off_target",
+    evidenceLevel:
+      typeof card.evidence_level === "string"
+        ? card.evidence_level
+        : fallback?.evidence_level || "abstract",
+    taskFamily:
+      typeof card.task_family === "string" ? card.task_family : fallback?.task_family || "",
+    modalityFamily:
+      typeof card.modality_family === "string"
+        ? card.modality_family
+        : fallback?.modality_family || "",
+    conditioningFamily:
+      typeof card.conditioning_family === "string"
+        ? card.conditioning_family
+        : fallback?.conditioning_family || "",
+    predictionFamily:
+      typeof card.prediction_family === "string"
+        ? card.prediction_family
+        : fallback?.prediction_family || "",
+    keyClaims: Array.isArray(card.key_claims)
+      ? card.key_claims
+      : fallback?.key_claims || [],
+    limitations: Array.isArray(card.limitations)
+      ? card.limitations
+      : fallback?.limitations || []
+  };
+}
+
+function normalizeLlmUsage(usage: LlmUsageSummary | undefined): LlmUsageSummary {
+  const byStage = usage?.by_stage && typeof usage.by_stage === "object" ? usage.by_stage : {};
+  return {
+    input_tokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : 0,
+    output_tokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : 0,
+    total_tokens: typeof usage?.total_tokens === "number" ? usage.total_tokens : 0,
+    by_stage: {
+      screening: normalizeLlmUsageStage(byStage.screening),
+      paper_card_extraction: normalizeLlmUsageStage(byStage.paper_card_extraction),
+      report_synthesis: normalizeLlmUsageStage(byStage.report_synthesis)
+    }
+  };
+}
+
+function normalizeLlmUsageStage(stage: unknown) {
+  if (!stage || typeof stage !== "object") {
+    return { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+  }
+  const payload = stage as Record<string, unknown>;
+  return {
+    input_tokens:
+      typeof payload.input_tokens === "number" ? payload.input_tokens : 0,
+    output_tokens:
+      typeof payload.output_tokens === "number" ? payload.output_tokens : 0,
+    total_tokens:
+      typeof payload.total_tokens === "number" ? payload.total_tokens : 0
   };
 }
 
@@ -1932,7 +2723,10 @@ function parseReportMarkdown(markdown: string): { title: string; sections: Repor
       currentSection = {
         id: makeSectionId(heading, sections.length),
         title: heading,
-        items: []
+        summary: "",
+        items: [],
+        evidenceCards: [],
+        appendix: false
       };
       sections.push(currentSection);
       continue;
@@ -2027,6 +2821,39 @@ function reportToneLabel(tone: ReportTone) {
     note: "说明"
   };
   return labels[tone];
+}
+
+function fitTierLabel(tier: ReportFitTier) {
+  const labels: Record<ReportFitTier, string> = {
+    core: "核心",
+    adjacent_transfer: "邻近",
+    off_target: "偏题"
+  };
+  return labels[tier] ?? tier;
+}
+
+function evidenceLevelLabel(level: string) {
+  return level === "fulltext" ? "正文级" : "摘要级";
+}
+
+function reportSectionIconPath(icon: string | undefined) {
+  switch (icon) {
+    case "scope":
+      return "M12 4.5v15M4.5 12h15M7.8 7.8l8.4 8.4M16.2 7.8l-8.4 8.4";
+    case "stack":
+      return "M12 4.5 4.5 8.5 12 12.5 19.5 8.5 12 4.5Zm0 8 7.5 4-7.5 4-7.5-4 7.5-4Z";
+    case "map":
+      return "M5 6.5 10 4.5 14 6 19 4.5v13L14 19.5 10 18 5 19.5v-13Zm5-2v13.5M14 6v13.5";
+    case "shield":
+      return "M12 4.5 18 7v5.2c0 3.5-2.1 6.3-6 7.8-3.9-1.5-6-4.3-6-7.8V7l6-2.5Z";
+    case "gap":
+      return "M5 6.5h6v11H5Zm8 0h6v11h-6Zm-1 5.5h1";
+    case "spark":
+      return "M12 4.5 13.8 9l4.7.4-3.6 2.9 1.1 4.7L12 14.8 8 17l1.1-4.7-3.6-2.9 4.7-.4L12 4.5Z";
+    case "book":
+    default:
+      return "M6.5 5.5h9a2 2 0 0 1 2 2v11h-9a2 2 0 0 0-2 2v-13a2 2 0 0 1 2-2Zm0 0v13";
+  }
 }
 
 function formatSources(sources: string[] | undefined) {
@@ -2442,6 +3269,17 @@ a:focus {
 .secondary-link:hover {
   background: var(--surface);
   box-shadow: var(--shadow-subtle);
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled,
+.ghost-btn:disabled,
+.danger-btn:disabled,
+.primary-link:disabled,
+.secondary-link:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .ghost-btn,
@@ -3404,6 +4242,24 @@ code {
   gap: 10px;
 }
 
+.upload-link {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.upload-link.disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.hidden-file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .status-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3549,32 +4405,139 @@ code {
   margin-top: 4px;
 }
 
+.report-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.report-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+}
+
+.report-summary-chip span {
+  color: var(--muted);
+}
+
+.report-summary-chip strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .report-toc {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 .report-toc button {
-  padding: 8px 10px;
-  background: var(--surface-strong);
+  position: relative;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  display: inline-grid;
+  place-items: center;
+}
+
+.report-toc button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.report-toc button.active {
+  border-color: var(--ink-mark);
+  background: rgba(250, 250, 248, 0.9);
+  box-shadow: var(--shadow-subtle);
+}
+
+.report-toc-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  min-width: 140px;
+  max-width: 220px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  background: rgba(250, 250, 248, 0.98);
+  box-shadow: var(--shadow-subtle);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  z-index: 6;
+}
+
+.report-toc button:hover .report-toc-tooltip,
+.report-toc button:focus-visible .report-toc-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .report-article {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .report-section {
-  padding: 14px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line-soft);
+}
+
+.report-section.appendix {
+  border-top-style: dashed;
+}
+
+.report-section-head {
+  margin-bottom: 12px;
+}
+
+.report-section-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.report-section-icon {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.report-section-icon svg {
+  width: 17px;
+  height: 17px;
 }
 
 .report-section h3 {
   font-size: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 2px;
+}
+
+.report-section-summary {
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .report-items {
@@ -3651,6 +4614,51 @@ code {
 
 .report-item.note {
   border-left-color: rgba(90, 74, 52, 0.26);
+}
+
+.report-evidence-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.evidence-card {
+  border: 1px solid var(--line-soft);
+  background: rgba(255, 255, 255, 0.54);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.evidence-card-head h4 {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.evidence-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.evidence-card-meta {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.evidence-card-copy {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .report-draft {
