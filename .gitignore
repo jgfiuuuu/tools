@@ -42,6 +42,7 @@ docs/*.md
 docs/*.txt
 docs/新建文件夹/
 参考样式/
+README.zh-CN.md
 
 # OS / editor
 .DS_Store
