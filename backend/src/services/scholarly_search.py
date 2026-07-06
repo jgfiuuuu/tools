@@ -214,7 +214,7 @@ class ScholarlySearchService:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "DeepResearch Scholarly Workbench/0.1",
+                "User-Agent": "CiteWeave Scholarly Workbench/0.1",
                 "Accept": "application/json,application/xml,text/xml,*/*",
             }
         )

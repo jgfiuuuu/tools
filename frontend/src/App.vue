@@ -9,10 +9,54 @@
     <aside class="left-rail">
       <div class="rail-top" :class="{ compact: !leftSidebarOpen }">
         <div v-if="leftSidebarOpen" class="brand-lockup">
-          <div class="brand-mark">MM</div>
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" class="brand-mark-icon">
+              <defs>
+                <linearGradient id="brand-mark-sheet" x1="9" y1="7" x2="40" y2="41" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#f7f2e7" />
+                  <stop offset="1" stop-color="#e6dcc7" />
+                </linearGradient>
+                <linearGradient id="brand-mark-ink" x1="15" y1="14" x2="34" y2="33" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#3f564f" />
+                  <stop offset="1" stop-color="#6b5d45" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M15 8.5h15.4L38.5 16v18.6c0 2.2-1.7 3.9-3.9 3.9H15c-2.2 0-4-1.8-4-4V12.5c0-2.2 1.8-4 4-4Z"
+                fill="url(#brand-mark-sheet)"
+                stroke="#5b5042"
+                stroke-linejoin="round"
+                stroke-width="1.5"
+              />
+              <path
+                d="M30.2 8.5V16H38"
+                fill="none"
+                stroke="#5b5042"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.5"
+              />
+              <path
+                d="M30.8 17.2c-1.6-1.7-3.7-2.6-6.1-2.6-4.8 0-8.6 3.8-8.6 8.6s3.8 8.7 8.6 8.7c2.4 0 4.6-.9 6.1-2.6"
+                fill="none"
+                stroke="url(#brand-mark-ink)"
+                stroke-linecap="round"
+                stroke-width="2.4"
+              />
+              <path
+                d="M16.7 22.4l3 8.5 4-6.4 3.6 6.4 4.3-10"
+                fill="none"
+                stroke="#2f3b39"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2.2"
+              />
+              <circle cx="33.2" cy="12.4" r="1.6" fill="#9a7b4f" />
+            </svg>
+          </div>
           <div v-if="leftSidebarOpen">
-            <h1>文献妙妙屋</h1>
-            <p class="brand-eyebrow">MIAOWEN LITERATURE WORKBENCH</p>
+            <h1>CiteWeave</h1>
+            <p class="brand-eyebrow">引纬 · Scholarly Workbench</p>
           </div>
         </div>
         <button
@@ -1010,9 +1054,9 @@ interface MetricRing {
   tone: MetricRingTone;
 }
 
-const APP_TITLE = "文献妙妙屋";
-const LEFT_PANEL_KEY = "miaowen:left-panel";
-const RUNTIME_TRAY_KEY = "miaowen:runtime-tray";
+const APP_TITLE = "CiteWeave";
+const LEFT_PANEL_KEY = "citeweave:left-panel";
+const RUNTIME_TRAY_KEY = "citeweave:runtime-tray";
 
 const sessions = ref<ResearchSession[]>([]);
 const currentSession = ref<ResearchSession | null>(null);
@@ -3030,15 +3074,24 @@ function persistBoolean(key: string, value: boolean) {
 }
 
 .brand-mark {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  background: var(--accent-strong);
-  color: #f8f1e5;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  border: 1px solid rgba(58, 52, 46, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(232, 223, 207, 0.82)),
+    var(--surface-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.58),
+    0 6px 12px rgba(42, 38, 34, 0.08);
+}
+
+.brand-mark-icon {
+  width: 38px;
+  height: 38px;
+  display: block;
 }
 
 .brand-lockup h1,

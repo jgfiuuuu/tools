@@ -1,4 +1,4 @@
-"""Orchestrator coordinating the deep research workflow."""
+"""Orchestrator coordinating the general research workflow."""
 
 from __future__ import annotations
 

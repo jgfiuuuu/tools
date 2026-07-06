@@ -1,4 +1,4 @@
-"""FastAPI entrypoint exposing the DeepResearchAgent via HTTP."""
+"""FastAPI entrypoint exposing the research workflows via HTTP."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def _sse(payload: dict[str, Any]) -> str:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="文献妙妙屋 API")
+    app = FastAPI(title="CiteWeave API")
 
     app.add_middleware(
         CORSMiddleware,
@@ -141,7 +141,7 @@ def create_app() -> FastAPI:
             base_url = config.llm_base_url or "unset"
 
         logger.info(
-            "DeepResearch configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
+            "CiteWeave configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
             "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s",
             config.llm_provider,
             config.resolved_model() or "unset",

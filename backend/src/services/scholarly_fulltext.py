@@ -78,7 +78,7 @@ class ScholarlyFulltextService:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "DeepResearch Scholarly Fulltext/0.1",
+                "User-Agent": "CiteWeave Scholarly Fulltext/0.1",
                 "Accept": "text/html,application/pdf,application/xhtml+xml,*/*",
             }
         )

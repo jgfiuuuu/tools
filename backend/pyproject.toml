@@ -1,7 +1,7 @@
 [project]
-name = "helloagents-deep-researcher"
+name = "citeweave-backend"
 version = "0.0.1"
-description = "Fully local web research and summarization assistant powered by HelloAgents."
+description = "Local-first scholarly workbench and research memo system powered by HelloAgents."
 authors = [
     { name = "Lance Martin" }
 ]

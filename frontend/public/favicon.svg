@@ -1,0 +1,28 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="card" x1="32" y1="24" x2="224" y2="232" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF8"/>
+      <stop offset="1" stop-color="#E7DCC6"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="72" y1="64" x2="182" y2="184" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3F564F"/>
+      <stop offset="1" stop-color="#6B5D45"/>
+    </linearGradient>
+  </defs>
+  <rect x="20" y="20" width="216" height="216" rx="56" fill="url(#card)"/>
+  <rect x="20" y="20" width="216" height="216" rx="56" stroke="#6A5C4D" stroke-width="10"/>
+  <path
+    d="M176 76C164 61 145 52 124 52C85.3 52 54 83.3 54 122C54 160.7 85.3 192 124 192C145 192 164 183 176 168"
+    stroke="url(#ink)"
+    stroke-width="16"
+    stroke-linecap="round"
+  />
+  <path
+    d="M78 104L102 172L128 129L152 172L178 94"
+    stroke="#2F3B39"
+    stroke-width="16"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="180" cy="74" r="10" fill="#9A7B4F"/>
+</svg>

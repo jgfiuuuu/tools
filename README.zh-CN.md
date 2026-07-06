@@ -1,4 +1,4 @@
-# deepresearch 本地运行说明
+# CiteWeave 本地运行说明
 
 ## 当前恢复状态
 

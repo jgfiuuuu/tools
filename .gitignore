@@ -38,6 +38,9 @@ docs/frontend-redesign-yorha-inspired.zh-CN.md
 docs/center-stage-UI-SPEC.zh-CN.md
 docs/latest-main-workbench-redesign-spec.zh-CN.md
 docs/main-workbench-ui-redesign-UI-SPEC.zh-CN.md
+docs/*.md
+docs/*.txt
+docs/新建文件夹/
 参考样式/
 
 # OS / editor
