@@ -1,55 +1,42 @@
 # CiteWeave
 
-Local-first scholarly workbench for paper retrieval, screening, close reading, and evidence memo synthesis.
+CiteWeave is a local-first scholarly workbench for AI/CS literature review, integrating paper retrieval, screening, close reading, and evidence memo synthesis.
 
-一个面向 AI/CS 文献调研的本地研究工作台，强调持续筛选、证据整理和研究备忘录生成，而不是一次性回答。
+面向 AI/CS 文献调研的本地化学术工作平台，集成多源检索、人工筛选、全文阅读与研究备忘录生成。
 
-<<<<<<< HEAD
-<p align="center">
-  一个面向 AI/CS 文献调研的本地研究工作台，强调持续筛选、证据整理和研究备忘录生成。
-</p>
-=======
 ![CiteWeave home view](docs/assets/readme-home.png)
->>>>>>> d589219 (docs: 重写 README 首页展示)
 
-## What It Is
+## Overview
 
-`CiteWeave` focuses on one workflow:
+CiteWeave organizes literature review as a persistent research session rather than a one-shot generation flow.  
+Each session keeps its candidate pool, screening decisions, full-text artifacts, memo content, and export results in a local workspace.
 
-1. Create a research session.
-2. Recall papers from multiple scholarly sources.
-3. Screen, rerank, and manually curate the candidate pool.
-4. Upload PDF or resolve full text when needed.
-5. Generate a structured research memo from confirmed evidence.
-6. Export the result as `Markdown` or `BibTeX`.
+## Capabilities
 
-It is not a chat shell and not a generic PDF manager. It is a workbench for maintaining research context across retrieval, review, and reporting.
+- Multi-source retrieval from `OpenAlex`, `arXiv`, and `Semantic Scholar`
+- Session-based screening with `include`, `exclude`, `save`, and `to_read`
+- Local PDF upload and full-text extraction
+- Structured memo synthesis from confirmed evidence
+- Evidence stratification with `core`, `adjacent_transfer`, and `off_target`
+- Export to `Markdown` and `BibTeX`
 
-<<<<<<< HEAD
-一个偏研究过程管理的本地工具。
-=======
-## Core Capabilities
->>>>>>> d589219 (docs: 重写 README 首页展示)
+## Workflow
 
-- Multi-source paper recall with `OpenAlex`, `arXiv`, and `Semantic Scholar`
-- Persistent research sessions backed by local `SQLite`
-- Human-in-the-loop screening with `include / exclude / save / to_read`
-- PDF upload and full-text extraction
-- Tiered memo synthesis with `core`, `adjacent_transfer`, and `off_target`
-- Export of memo content and references
+1. Create a research session for a specific topic.
+2. Generate query tasks and recall candidate papers from multiple sources.
+3. Review, rerank, and curate the candidate pool in the workbench.
+4. Upload PDF or resolve full text when additional evidence is needed.
+5. Generate a research memo from the confirmed paper set.
+6. Export the memo and references for downstream writing.
 
-<<<<<<< HEAD
-主工作台把检索、筛选、精读和报告都收在同一个界面里，优先保留研究过程本身。
-=======
 ## Stack
->>>>>>> d589219 (docs: 重写 README 首页展示)
 
 - Frontend: `Vue 3`, `TypeScript`, `Vite`
 - Backend: `FastAPI`, `Pydantic`
-- Workflow: `LangGraph`
+- Workflow graph: `LangGraph`
 - Storage: `SQLite`
-- LLM access: `openai` client with OpenAI-compatible endpoints
-- Full text: `pypdf`
+- Model access: `openai` client with OpenAI-compatible endpoints
+- Full-text parsing: `pypdf`
 
 ## Run Locally
 
@@ -80,11 +67,6 @@ Default local addresses:
 
 - frontend: `http://localhost:5173`
 - backend: `http://localhost:8000`
-
-<<<<<<< HEAD
-=======
-Detailed local setup notes are in [README.zh-CN.md](README.zh-CN.md).
->>>>>>> d589219 (docs: 重写 README 首页展示)
 
 ## Main Endpoints
 
@@ -124,17 +106,17 @@ scripts/
 
 ## Scope
 
-Good fit:
+Appropriate for:
 
 - AI/CS literature review preparation
 - Personal research assistance
 - Local-first workflow prototyping
 - Portfolio presentation of retrieval, workbench, and memo generation
 
-Not the target:
+Not intended for:
 
 - Public production deployment
-- Full replacement for academic databases
+- Replacement of academic databases
 - Fully automatic final-review writing without human verification
 
 ## License
