@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  一个面向 AI/CS 文献调研的本地研究工作台，强调持续筛选、证据整理和研究备忘录生成，而不是一次性回答。
+  一个面向 AI/CS 文献调研的本地研究工作台，强调持续筛选、证据整理和研究备忘录生成。
 </p>
 
 [![CiteWeave home view](docs/assets/readme-home.png)](docs/assets/readme-home.png)
@@ -28,7 +28,7 @@
 - 基于确认论文生成结构化研究备忘录
 - 导出 `Markdown` 和 `BibTeX`
 
-它不是 PDF 管理器，也不是问答壳，而是一个偏研究过程管理的本地工具。
+一个偏研究过程管理的本地工具。
 
 ## Interface
 
@@ -108,7 +108,6 @@ npm run dev
 - frontend: `http://localhost:5173`
 - backend: `http://localhost:8000`
 
-更详细的本地运行说明见 [README.zh-CN.md](README.zh-CN.md)。
 
 ## Key Endpoints
 
